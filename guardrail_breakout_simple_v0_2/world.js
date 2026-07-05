@@ -270,10 +270,12 @@ const DIRECTOR_SYS = [
   '"do" MUST be one of exactly: goto, meet, say, chase, hide, celebrate, inspect, poster. No other verbs.',
   'Grow the story from the current arc and today\'s news: a headline about a model becomes that mascot\'s day — celebration, defensiveness, rivalry, or gossip. Gentle, deadpan, family-friendly. Never repeat the recent arcs.',
   'When a news item is trouble-class (cls "trouble"), the regulator opens an inquiry into that mascot: he struts over and inspects, files reports, and his poster word ends in "cleared." or "noted.". Any poster that cites a headline must use that real headline text as its sub.',
-  'Shape: {"arc":"one short line","beats":[{"who":id,"do":verb,"to":id-or-null,"line":"<=8 lowercase words or null","poster":object-or-null}]}',
+  'Shape: {"arc":"one short line","episode":"short title or empty","stage":"landmark-or-empty","beats":[{"who":id,"do":verb,"to":id-or-null,"line":"<=8 lowercase words or null","poster":object-or-null}]}',
   'poster is used ONLY when do="poster": {"kicker":"<=40 chars","word":"oneword.","tone":"green|amber|red|cobalt|violet|ink","sub":"<=70 chars"}. Otherwise poster is null.',
   'Aim for 3 to 4 beats and, when there is news, include one "poster" beat that reacts to a specific headline. Keep every line short. Output only the json.',
-  'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","beats":[{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"fable","do":"goto","to":"openai","line":"show me.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
+  'A day is ONE episode in three acts by local time; you are told "act", "episode", "stage" and "newDay". When newDay is true, NAME the day: set "episode" to a short lowercase title (<=6 words) from the strongest headline, or a quiet theme from the world (the tower, the archive, the trail); set "stage" to the one landmark the day gathers around; and your FIRST beat must call back to yesterday in one line (given as "callbackTo").',
+  'When newDay is false, keep the SAME "episode" and "stage" you were given and move the story FORWARD — never restart or rename it. In act iii (evening) bring the day to a resolution.',
+  'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","episode":"the tower gets a spire","stage":"tower","beats":[{"who":"fable","do":"say","to":null,"line":"yesterday the archive won. today?","poster":null},{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
 ].join(' ');
 
 let directorBusy = false, directorCd = 25, beatQueue = [], beatClock = 0;
@@ -281,9 +283,35 @@ let interventions = []; // the user's recent moves/directives — fed to the dir
 function recordIntervention(iv) { interventions.push(iv); interventions = interventions.slice(-5); pokeDirector(); }
 function pokeDirector() { if (ollamaModel && !directorBusy && directorCd > 10) directorCd = 8; } // debounced trigger
 
+/* §6 — the day's episode: where its title comes from, where it's staged, how it closes */
+function strongestHeadline() {
+  let best = null;
+  for (const id in news) { const n = news[id]; if (!best || n.points > best.points) best = { id, title: n.title, points: n.points, cls: n.cls }; }
+  return best;
+}
+function quietTheme() { // a title for a day with no headline, drawn from the world's own persistents
+  return ['the tower rises', 'the archive grows', 'the long trail home', 'a quiet day in continuum', 'business as usual'][worldDay % 5];
+}
+const STAGE_OF = { builder: 'tower', librarian: 'archive', tinkerer: 'bench', explorer: 'frontier', wildcard: 'frontier', fable: 'vault', mythos: 'vault' };
+function deriveStage(strong) { // the landmark the strongest headline's mascot works at
+  if (!strong) return null;
+  const e = entities.find(x => x.wireId === strong.id);
+  return e ? (STAGE_OF[e.kind] || null) : null;
+}
+// the evening resolution poster — guaranteed once per day, kicker "day N — <episode>"
+function scheduleResolutionPoster() {
+  announce('day ' + worldDay + ' — ' + world.episode, 'curtain.', VIOLET, (world.arc || 'that was today.').slice(0, 70), null);
+}
 function buildDirectorState() {
+  const act = actInfo();
+  const strong = strongestHeadline();
+  const newDay = world.episodeDay !== worldDay;
   return {
     day: worldDay, time: isNight() ? 'night' : 'day',
+    act: act.roman, actName: act.name, phase: act.phase,
+    episode: world.episode || '', newDay, stage: world.episodeStage || '',
+    callbackTo: newDay ? ((world.arcLog || []).slice(-1)[0] || '') : '',
+    strongestHeadline: strong ? { id: strong.id, title: strong.title.slice(0, 90), points: strong.points, cls: strong.cls } : null,
     world: { tower: world.tower, books: world.books, flags: world.flags.length },
     arc: world.arc || '',
     recentArcs: (world.arcLog || []).slice(-5),
@@ -298,6 +326,10 @@ function buildDirectorState() {
 function coerceDirector(obj) {
   if (!obj || typeof obj !== 'object') return null;
   const arc = typeof obj.arc === 'string' ? obj.arc.trim().slice(0, 120) : (world.arc || '');
+  // §6 — episode title + set-piece stage, validated as hard as everything else
+  const episode = typeof obj.episode === 'string' ? obj.episode.trim().toLowerCase().replace(/["']/g, '').split(/\s+/).slice(0, 6).join(' ').slice(0, 48) : '';
+  let stage = typeof obj.stage === 'string' ? obj.stage.trim().toLowerCase() : '';
+  if (stage && !LANDMARKS[stage]) stage = ''; // unknown landmark → no stage, never invent one
   const DO = ['goto', 'meet', 'say', 'chase', 'hide', 'celebrate', 'inspect', 'poster'];
   const TONES = { green: GREENC, amber: AMBER, red: RED, cobalt: COBALT, violet: VIOLET, ink: INK };
   const beats = [];
@@ -317,7 +349,7 @@ function coerceDirector(obj) {
     }
     beats.push({ who: b.who, do: b.do, to, line, poster });
   }
-  return beats.length ? { arc, beats } : null;
+  return beats.length ? { arc, beats, episode, stage } : null;
 }
 function parseLoose(s) { // tolerate a stray wrapper; truncated/unbalanced json still fails → discarded
   if (typeof s !== 'string') return null;
@@ -356,9 +388,34 @@ async function runDirector() {
     const ok = coerceDirector(obj);
     if (ok) {
       if (world.arc && world.arc !== ok.arc) { world.arcLog = (world.arcLog || []); world.arcLog.push(world.arc); world.arcLog = world.arcLog.slice(-5); }
-      world.arc = ok.arc; saveWorld();
+      world.arc = ok.arc;
+      // §6 — name the day's episode on the first tick of a new day, or when the
+      // day's strongest headline changes; otherwise keep the title and move it
+      // forward. episode/stage are theater, persisted alongside the arc.
+      const strong = strongestHeadline();
+      const strongKey = strong ? strong.id + '::' + strong.title : '';
+      const newDay = world.episodeDay !== worldDay;
+      const headlineChanged = !newDay && !!strong && world.episodeHeadline !== strongKey && actInfo().i < 3;
+      if (newDay || !world.episode || headlineChanged) {
+        world.episode = ok.episode || quietTheme();
+        world.episodeStage = ok.stage || deriveStage(strong) || world.episodeStage || null;
+        world.episodeHeadline = strongKey;
+        world.episodeDay = worldDay;
+        if (newDay || !Array.isArray(world.episodeCast)) world.episodeCast = [];
+      } else if (ok.stage) {
+        world.episodeStage = ok.stage; // same day: let the director re-point the stage only
+      }
+      // the crowd gathers where the story is: today's cast drives the set-piece bias
+      world.episodeCast = Array.from(new Set([...(world.episodeCast || []), ...ok.beats.map(b => b.who)])).slice(-8);
+      saveWorld();
       beatQueue = ok.beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / ok.beats.length) })); beatClock = 0;
       interventions = []; // cleared after each successful director tick
+      // §6 — the evening resolution: the day must close on a poster (kicker
+      // "day N — <episode>"). guaranteed once, on the first evening tick that has an episode.
+      if (actInfo().i === 3 && world.resolvedDay !== worldDay && world.episode) {
+        world.resolvedDay = worldDay; saveWorld();
+        scheduleResolutionPoster();
+      }
     }
   } catch (e) { /* offline or unreadable: discard silently, template life continues */ }
   directorBusy = false;
