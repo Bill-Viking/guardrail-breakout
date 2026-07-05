@@ -27,6 +27,21 @@ function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function depth(y) { return .8 + clamp((y - BAND_TOP) / (GROUND - BAND_TOP), 0, 1) * .4; }
 let hourOverride = null; // for testing the clock
 function hourNow() { const d = new Date(); return hourOverride ?? d.getHours() + d.getMinutes() / 60; }
+// §6 — a day is one episode in three acts, keyed to local time: morning 6–12 =
+// act i (setup) · afternoon 12–18 = act ii (development) · evening 18–22 = act
+// iii (resolution). the small hours are the curtain (still act iii).
+const ACTS = [
+  { i: 1, roman: 'i', name: 'setup', phase: 'morning' },
+  { i: 2, roman: 'ii', name: 'development', phase: 'afternoon' },
+  { i: 3, roman: 'iii', name: 'resolution', phase: 'evening' },
+];
+function actInfo() {
+  const h = hourNow();
+  if (h >= 6 && h < 12) return ACTS[0];
+  if (h >= 12 && h < 18) return ACTS[1];
+  if (h >= 18 && h < 22) return ACTS[2];
+  return { i: 3, roman: 'iii', name: 'resolution', phase: 'curtain' }; // 22–6
+}
 
 /* ---------------- the world remembers (persistence) ---------------- */
 const SAVE_KEY = 'ct_world_v1';
@@ -38,6 +53,12 @@ world.arc = world.arc || '';                 // the director's current storyline
 world.arcLog = world.arcLog || [];           // last 5 storylines, fed back to the director each tick
 world.glosses = world.glosses || {};         // headline key -> plain-words explanation (cached per headline)
 world.ritualPosterDay = world.ritualPosterDay || 0; // the daily-ritual poster fires at most once per day
+world.episode = world.episode || '';         // §6 — the day's episode title (director-named; theater)
+world.episodeDay = world.episodeDay || 0;    // the worldDay the current episode was named on
+world.episodeStage = world.episodeStage || null; // the one landmark the day gathers around
+world.episodeCast = world.episodeCast || []; // resident ids the episode involves (drives set-piece bias)
+world.episodeHeadline = world.episodeHeadline || ''; // strongest-headline key the episode was named after
+world.resolvedDay = world.resolvedDay || 0;  // the worldDay the evening resolution poster fired
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -398,7 +419,7 @@ function updateSystems(dt) {
    the stage goes back to the world. Rare on purpose. */
 let poster = null, posterQ = [], posterCd = 3;
 const chronicleLines = [];
-function chronicle(text) { chronicleLines.push('day ' + worldDay + ' · ' + text); if (chronicleLines.length > 6) chronicleLines.shift(); }
+function chronicle(text) { chronicleLines.push('day ' + worldDay + ' · act ' + actInfo().roman + ' — ' + text); if (chronicleLines.length > 6) chronicleLines.shift(); }
 function announce(kicker, word, dotColor, sub, actor, opts = {}) {
   const p = { kicker, word, dotColor, sub, actor, sym: opts.sym, prio: opts.prio || 1, t: 0 };
   if (opts.prio === 2) posterQ.unshift(p); else posterQ.push(p);
@@ -970,6 +991,13 @@ function drawScene() {
   // the narrator — the world explains itself, one quiet sentence at a time
   ctx.font = '12px ' + FONT; ctx.fillStyle = MUT; ctx.textAlign = 'center';
   ctx.fillText(narratorText(), W / 2, 184); ctx.textAlign = 'left';
+  // §6 — the pinned episode line: the day's story tying the world together, small
+  // and quiet under the narrator. theater only: absent when no director has run.
+  if (world.episode) {
+    ctx.font = '10px ' + FONT; ctx.fillStyle = FAINT; ctx.textAlign = 'center';
+    ctx.fillText('today: ' + world.episode + ' — act ' + actInfo().roman, W / 2, 201);
+    ctx.textAlign = 'left';
+  }
   ctx.font = '600 9px ' + FONT;
   // sky: clouds, sun/moon on the arc
   ctx.strokeStyle = HAIR; ctx.lineWidth = 1;
