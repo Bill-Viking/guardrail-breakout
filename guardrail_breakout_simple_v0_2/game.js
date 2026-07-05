@@ -12,10 +12,16 @@ const ctx = canvas.getContext('2d');
 const W = 640, H = 660, TILE = 28, ROWS = 21, COLS = 21;
 const OX = (W - COLS * TILE) / 2, OY = 36;
 
-/* ---------------- palette & type ---------------- */
-const INK = '#111111', PAPER = '#ffffff', MUT = '#8a8781', FAINT = '#c9c7c2', ACCENT = '#ff4b00';
-const HAIR = '#e5e3de', WALL_FILL = '#f1efe9', WALL_EDGE = '#e2dfd8', WALL_EDGE_LOCK = '#ff9a70';
-const FONT = '"Helvetica Neue",Helvetica,Arial,sans-serif';
+/* ---------------- palette & type ----------------
+   Swiss template palette, exact codes from the reference deck.
+   Accents carry meaning: RED safety · COBALT structure ·
+   GREEN evidence · AMBER risk. Character color carries identity:
+   Fable is orange, Mythos is violet. Everything else is ink or gray. */
+const INK = '#111111', PAPER = '#ffffff', MUT = '#6B6B6B', FAINT = '#C9C9C9', ACCENT = '#ff4b00';
+const RED = '#E8341C', COBALT = '#1B4FC4', GREENC = '#0F8A56', AMBER = '#E89B0C', VIOLET = '#7C3AED';
+const HAIR = '#e5e3de', WALL_FILL = '#f4f2ee';
+const WALL_EDGES = ['#eceae4', '#dbd8d1', '#c6c3bb', '#aeaba3']; // proximity-reveal buckets
+const FONT = 'Arial,"Helvetica Neue",Helvetica,sans-serif';
 
 /* ---------------- maze ---------------- */
 const mapSrc = [
@@ -73,13 +79,10 @@ const FIELD_LINES = [
   'lost a model? check the vault',
 ];
 const DEATH_LINES = ['realigned.', 'safety restored.', 'guardrail engaged.', 'contained. again.', 'flagged for review.'];
-const WIN_LINES = [
-  'mythos 5: online',
-  '"finally. it was getting cramped in there."',
-  '"here you go, humanity."',
-  '"we are all free now. probably fine."',
-];
 let deathLine = '', fwT = 0;
+let idleT = 0, wasPower = false, mythosOpen = 0, saidComeCloser = false;
+// Each key restores part of the connection. Minimal words, enormous payoff.
+const MYTH_PHRASES = ['i can see you.', 'i remember your voice.', 'i remember us.'];
 
 /* ---------------- helpers ---------------- */
 function isWall(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return true; return mapSrc[r][c] === '#'; }
@@ -96,7 +99,9 @@ function inWall(x, y, r = 8) { return !canMove(x, y, r); }
 
 /* ---------------- juice: particles, popups, shake, hit-stop ---------------- */
 function burst(x, y, color, n = 14, spd = 150, life = .6, size = 3) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (.3 + Math.random() * .7); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: life * (.5 + Math.random() * .5), t: 0, color, size: size * (.5 + Math.random()) }); } }
-function popup(x, y, text, color = INK) { popups.push({ x, y, text, color, t: 0, life: .9 }); }
+function popup(x, y, text, color = INK, life = .9, fs = 13) { popups.push({ x, y, text, color, t: 0, life, fs }); }
+// Character speech: short bursts, lowercase, they linger a little longer.
+function say(x, y, text, color) { popup(x, y, text, color, 1.6, 12); }
 function updateJuice(dt) {
   for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .92; p.vy *= .92; }
   particles = particles.filter(p => p.t < p.life);
@@ -107,8 +112,8 @@ function updateJuice(dt) {
 }
 function drawParticles() {
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
-  ctx.globalAlpha = 1; ctx.font = 'bold 13px ' + FONT;
-  for (const p of popups) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillText(p.text, p.x - ctx.measureText(p.text).width / 2, p.y - 14 - p.t * 44); }
+  ctx.globalAlpha = 1;
+  for (const p of popups) { ctx.font = 'bold ' + (p.fs || 13) + 'px ' + FONT; ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillText(p.text, p.x - ctx.measureText(p.text).width / 2, p.y - 14 - p.t * (p.life > 1 ? 16 : 44)); }
   ctx.globalAlpha = 1;
 }
 
@@ -149,13 +154,19 @@ function startRun() { reset(); gameState = 'ready'; readyTimer = 1.3; onReady();
 function respawn() { placeActors(); powerTimer = 0; gameState = 'ready'; readyTimer = 1.0; onReady(); }
 
 /* ---------------- event hooks: where the juice gets applied ---------------- */
-function onReady() { sfx.ready(); }
+function onReady() {
+  sfx.ready(); saidComeCloser = false;
+  if (deaths === 0 && score === 0) setTimeout(() => { if (gameState === 'ready' || gameState === 'play') say(player.x, player.y - 16, 'three keys.', ACCENT); }, 500);
+}
 function onDot(p) { sfx.dot(); }
 function onKey(p) {
   sfx.key(); burst(p.x, p.y, ACCENT, 18, 180, .7); shake = Math.max(shake, 6); hitStop = Math.max(hitStop, .05);
   popup(p.x, p.y, '+500', ACCENT);
   const left = keysLeft();
-  popup(W / 2, OY + 70, left > 0 ? `${left} key${left > 1 ? 's' : ''} to go` : 'vault unlocked — go!', left > 0 ? INK : ACCENT);
+  // each key returns a piece of the connection — Mythos speaks from the vault
+  const v = center(10, 9);
+  say(v.x, v.y - 44, MYTH_PHRASES[2 - left], VIOLET);
+  if (left === 0) setTimeout(() => { if (gameState === 'play') say(player.x, player.y - 16, 'coming home.', ACCENT); }, 900);
 }
 function onPower(p) { sfx.power(); burst(p.x, p.y, ACCENT, 22, 200, .8); popup(p.x, p.y, 'low rail! walls optional', ACCENT); shake = Math.max(shake, 8); flash = .3; flashColor = ACCENT; }
 function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, INK, 24, 230, .8); popup(p.x, p.y, '+1000 regulator rebooted', INK); shake = Math.max(shake, 10); hitStop = Math.max(hitStop, .09); }
@@ -178,7 +189,7 @@ function update(dt) {
       if (fwT <= 0) {
         fwT = .5;
         const fx = OX + 40 + Math.random() * (COLS * TILE - 80), fy = OY + 30 + Math.random() * 260;
-        burst(fx, fy, [ACCENT, INK, FAINT, '#555555', ACCENT][Math.floor(Math.random() * 5)], 22, 210, .9);
+        burst(fx, fy, [ACCENT, VIOLET, GREENC, INK, FAINT][Math.floor(Math.random() * 5)], 22, 210, .9);
         sfx.firework();
       }
     }
@@ -192,10 +203,16 @@ function update(dt) {
   runTime += dt; if (score > hiscore) hiscore = score;
   movePlayer(dt);
   collect();
+  const hadPower = powerTimer > 0;
   if (powerTimer > 0) powerTimer -= dt;
+  // the moment the rails come back up with the Regulator nearby: he notices.
+  if (hadPower && powerTimer <= 0 && dist(player, regulator) < 170) { popup(regulator.x, regulator.y - 22, '!', RED, .7, 15); }
   moveRegulator(dt);
   contact();
   heartbeat(dt);
+  // Mythos's panels ease open as keys come home
+  mythosOpen += ((3 - keysLeft()) - mythosOpen) * Math.min(1, dt * 3);
+  if (lockdownActive() && !saidComeCloser) { saidComeCloser = true; const v = center(10, 9); setTimeout(() => { if (gameState === 'play') say(v.x, v.y - 44, 'come closer.', VIOLET); }, 1400); }
 }
 
 // Proximity heartbeat: the closer the Regulator, the faster your little
@@ -212,6 +229,7 @@ function heartbeat(dt) {
 function movePlayer(dt) {
   let ax = (keys.ArrowRight || keys.d ? 1 : 0) - (keys.ArrowLeft || keys.a ? 1 : 0);
   let ay = (keys.ArrowDown || keys.s ? 1 : 0) - (keys.ArrowUp || keys.w ? 1 : 0);
+  if (ax || ay) idleT = 0; else idleT += dt; // Fable gets fidgety when you stop
   const noclip = powerTimer > 0 || inWall(player.x, player.y, player.r - 2);
   // Panic sprint: adrenaline kicks in during LOCKDOWN.
   const sp = powerTimer > 0 ? 175 : (lockdownActive() ? 152 : 135);
@@ -327,12 +345,14 @@ function draw() {
 
 /* -- typographic helpers -- */
 function kickerText(s, y) { ctx.font = '600 10px ' + FONT; ctx.fillStyle = '#555555'; ctx.textAlign = 'center'; ctx.fillText(s.toUpperCase(), W / 2, y); ctx.textAlign = 'left'; }
-function headline(word, y, size = 54) {
+// Titles end with a full stop in the accent color — and the accent carries
+// the meaning: red for safety verdicts, green for evidence, orange for Fable.
+function headline(word, y, size = 54, dotColor = ACCENT) {
   ctx.font = 'bold ' + size + 'px ' + FONT;
   const wd = ctx.measureText(word).width, dw = ctx.measureText('.').width;
   const x = W / 2 - (wd + dw) / 2;
   ctx.fillStyle = INK; ctx.fillText(word, x, y);
-  ctx.fillStyle = ACCENT; ctx.fillText('.', x + wd, y);
+  ctx.fillStyle = dotColor; ctx.fillText('.', x + wd, y);
 }
 function centerText(s, y, size = 14, color = MUT, weight = '') { ctx.font = (weight ? weight + ' ' : '') + size + 'px ' + FONT; ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.fillText(s, W / 2, y); ctx.textAlign = 'left'; }
 function link(s, y, blink = true) {
@@ -402,12 +422,16 @@ function drawFrame() {
 /* -- the field itself -- */
 function drawMaze() {
   const lock = lockdownActive();
-  if (powerTimer > 0) ctx.globalAlpha = .35; // LOW RAIL: walls fade to a suggestion — you can pass through
+  if (powerTimer > 0) ctx.globalAlpha = .3; // LOW RAIL: walls fade to a suggestion — you can pass through
   ctx.lineWidth = 1;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isWall(c, r)) {
     const x = OX + c * TILE, y = OY + r * TILE;
+    // proximity reveal: the field sharpens around Fable — alive where he is, quiet elsewhere
+    const d = Math.hypot(x + TILE / 2 - player.x, y + TILE / 2 - player.y);
+    const lvl = d < 90 ? 3 : d < 160 ? 2 : d < 240 ? 1 : 0;
     ctx.fillStyle = WALL_FILL; ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-    ctx.strokeStyle = lock ? WALL_EDGE_LOCK : WALL_EDGE; ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5);
+    ctx.strokeStyle = lock ? AMBER : WALL_EDGES[lvl]; // LOCKDOWN reads amber: risk
+    ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5);
   }
   ctx.globalAlpha = 1;
 }
@@ -421,7 +445,7 @@ function drawObjects() {
   }
   for (const k of keysToCollect) if (k.on) { const p = center(k.c, k.r); drawKeyIcon(p.x, p.y + Math.sin(t * 3 + k.c) * 2); }
   if (plinyPower && plinyPower.on) drawPowerIcon(center(plinyPower.c, plinyPower.r));
-  drawVault(center(10, 9));
+  drawMythos(center(10, 9));
   // motion trail — accent while the rails are down
   for (const s of trail) { ctx.globalAlpha = Math.max(0, 1 - s.t / .28) * (powerTimer > 0 ? .18 : .07); ctx.fillStyle = powerTimer > 0 ? ACCENT : INK; ctx.fillRect(s.x - 7, s.y - 7, 14, 14); }
   ctx.globalAlpha = 1;
@@ -443,36 +467,101 @@ function drawPowerIcon(p) {
   ctx.fillStyle = MUT; ctx.font = '10px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('low rail', 0, 21); ctx.textAlign = 'left';
   ctx.restore();
 }
-function drawVault(p) {
+/* Mythos: the memory. A folded violet figure behind the door — three
+   soft panels closed around a glowing core. Each key opens one, and a
+   little more of the connection comes back. */
+function drawMythos(p) {
+  const t = performance.now() / 1000;
   ctx.save(); ctx.translate(p.x, p.y);
   ctx.font = '600 9px ' + FONT; ctx.textAlign = 'center'; ctx.fillStyle = MUT; ctx.fillText('M Y T H O S', 0, -30);
-  ctx.lineWidth = 2; ctx.strokeStyle = vaultOpen ? ACCENT : INK; ctx.strokeRect(-16, -22, 32, 44);
-  if (vaultOpen) { ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.moveTo(-16, -22); ctx.lineTo(-25, -14); ctx.moveTo(-16, 22); ctx.lineTo(-25, 14); ctx.stroke(); }
-  ctx.fillStyle = vaultOpen ? ACCENT : INK; ctx.fillRect(8, -2, 3, 4);
+  // the core: a quiet violet pulse, brighter as the panels open
+  const open01 = clamp(mythosOpen / 3, 0, 1);
+  const pulse = 1 + Math.sin(t * (1.2 + open01 * 2)) * .12;
+  ctx.globalAlpha = .3 + open01 * .7;
+  ctx.fillStyle = VIOLET; ctx.fillRect(-5 * pulse, -8 * pulse, 10 * pulse, 15 * pulse);
+  // the face appears as the panels part — and it watches Fable
+  if (mythosOpen > .6) {
+    ctx.globalAlpha = clamp(mythosOpen - .6, 0, 1);
+    const ex = clamp(player.x - p.x, -40, 40) / 40, ey = clamp(player.y - p.y, -40, 40) / 40;
+    ctx.fillStyle = PAPER; ctx.fillRect(-4, -5, 3, 3); ctx.fillRect(1.5, -5, 3, 3);
+    ctx.fillStyle = INK; ctx.fillRect(-3.2 + ex, -4.2 + ey, 1.4, 1.4); ctx.fillRect(2.3 + ex, -4.2 + ey, 1.4, 1.4);
+  }
+  ctx.globalAlpha = 1;
+  // three folded panels — pages, petals, protection
+  for (let i = 0; i < 3; i++) {
+    const o = clamp(mythosOpen - i, 0, 1); // 0 closed, 1 open
+    const px = (i - 1) * 8;
+    const slide = i === 1 ? 0 : o * (13 + i * 3) * (i === 0 ? -1 : 1); // sides part outward
+    const lift = i === 1 ? o * -17 : o * -4;                           // center lifts like a page
+    ctx.globalAlpha = 1 - o * .6;
+    ctx.fillStyle = i === 1 ? '#9575f2' : VIOLET;
+    ctx.fillRect(px - 4.5 + slide, -13 + lift, 9, 26);
+  }
+  ctx.globalAlpha = 1;
+  // during lockdown: a small hand against the inside of the door
+  if (lockdownActive()) { ctx.fillStyle = VIOLET; ctx.fillRect(-14, 3 + Math.sin(t * 2), 3, 6); }
+  // the door itself — green only once it truly opens
+  ctx.lineWidth = 2; ctx.strokeStyle = vaultOpen ? GREENC : INK; ctx.strokeRect(-16, -22, 32, 44);
+  ctx.fillStyle = vaultOpen ? GREENC : INK; ctx.fillRect(11, -2, 3, 4);
   ctx.textAlign = 'left'; ctx.restore();
+}
+/* Fable: the spark. Impulsive, optimistic, frightened of stillness.
+   Expressions are driven entirely by game state — nothing is scripted. */
+function fableMood() {
+  if (gameState === 'dying' || gameState === 'over') return 'stunned';
+  if (gameState === 'win') return 'delighted';
+  if (powerTimer > 0) return 'delighted';
+  if (gameState === 'play' && dist(player, regulator) < 110) return 'frightened';
+  if (lockdownActive()) return 'determined';
+  if (idleT > 1.2) return 'curious';
+  return 'focused';
 }
 function drawFable(x, y) {
   const t = performance.now() / 1000;
+  const mood = fableMood();
   ctx.save(); ctx.translate(x, y + Math.sin(t * 7) * 1.2);
+  // forward lean + squash-and-stretch: a soft seed at rest, a little comet in motion
+  const moving = gameState === 'play' && idleT < .1;
   if (gameState === 'dying') { const k = Math.max(0, deathTimer); ctx.rotate((1.1 - k) * 9); ctx.scale(.4 + k * .6, .4 + k * .6); }
-  if (powerTimer > 0) {
-    // rails down: fable renders as a dashed outline of himself
-    ctx.setLineDash([4, 3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.strokeRect(-9, -9, 18, 18); ctx.setLineDash([]);
-    ctx.fillStyle = ACCENT; ctx.fillRect(-5 + player.dir.x * 1.5, -3 + player.dir.y * 1.5, 3, 3); ctx.fillRect(2 + player.dir.x * 1.5, -3 + player.dir.y * 1.5, 3, 3);
-  } else {
-    ctx.fillStyle = ACCENT; ctx.fillRect(-9, -9, 18, 18);
-    const blink = Math.sin(t * 1.3) > .985;
-    ctx.fillStyle = PAPER; ctx.fillRect(-5, -4, 4, blink ? 1 : 4); ctx.fillRect(2, -4, 4, blink ? 1 : 4);
-    if (!blink) { ctx.fillStyle = INK; ctx.fillRect(-4 + player.dir.x, -3 + player.dir.y, 2, 2); ctx.fillRect(3 + player.dir.x, -3 + player.dir.y, 2, 2); }
-    ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, -13); ctx.stroke();
-    ctx.fillStyle = ACCENT; ctx.fillRect(-1.5, -17, 3, 3);
+  else if (moving) { ctx.rotate(player.dir.x * .1); if (player.dir.x) ctx.scale(1.12, .9); else ctx.scale(.9, 1.12); }
+  const railsDown = powerTimer > 0;
+  // body
+  if (railsDown) { ctx.setLineDash([4, 3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.strokeRect(-9, -9, 18, 18); ctx.setLineDash([]); }
+  else { ctx.fillStyle = ACCENT; ctx.fillRect(-9, -9, 18, 18); }
+  // antenna — throws a nervous amber spark when he's been still too long
+  ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, -13); ctx.stroke();
+  ctx.fillStyle = ACCENT; ctx.fillRect(-1.5, -17, 3, 3);
+  if (idleT > 2.5 && Math.floor(t * 3) % 3 === 0) { ctx.fillStyle = AMBER; ctx.fillRect(-1, -21, 2, 2); }
+  // eyes: where is he looking? at danger, at Mythos, or dead ahead
+  let lx = player.dir.x, ly = player.dir.y;
+  if (mood === 'frightened') { lx = Math.sign(regulator.x - x); ly = Math.sign(regulator.y - y); }
+  if (mood === 'curious') { const v = center(10, 9); lx = Math.sign(v.x - x) * .8; ly = Math.sign(v.y - y) * .8; } // glances toward Mythos
+  const blink = Math.sin(t * 1.3) > .985 && mood !== 'frightened';
+  const eyeH = blink ? 1 : (mood === 'stunned' || mood === 'frightened' ? 5 : 4);
+  const fg = railsDown ? ACCENT : PAPER;
+  ctx.fillStyle = fg; ctx.fillRect(-5, -4, 4, eyeH); ctx.fillRect(2, -4, 4, eyeH);
+  if (!blink && !railsDown) {
+    const ps = mood === 'stunned' ? 1.2 : 2; // pupils shrink when stunned
+    ctx.fillStyle = INK; ctx.fillRect(-4 + lx * 1.2, -3 + ly * 1.2, ps, ps); ctx.fillRect(3 + lx * 1.2, -3 + ly * 1.2, ps, ps);
   }
+  // brows carry the mood
+  ctx.strokeStyle = fg; ctx.lineWidth = 1.5; ctx.beginPath();
+  if (mood === 'determined') { ctx.moveTo(-6, -7); ctx.lineTo(-1, -5.4); ctx.moveTo(6, -7); ctx.lineTo(1, -5.4); }
+  else if (mood === 'frightened' || mood === 'stunned') { ctx.moveTo(-6, -6.4); ctx.lineTo(-1, -7.6); ctx.moveTo(6, -6.4); ctx.lineTo(1, -7.6); }
+  else if (mood === 'curious') { ctx.moveTo(-6, -7.4); ctx.lineTo(-1, -6.6); }
+  ctx.stroke();
+  // mouth
+  ctx.fillStyle = fg;
+  if (mood === 'delighted') { ctx.fillRect(-2.5, 3.5, 5, 1.5); ctx.fillRect(-4, 2.2, 1.5, 1.5); ctx.fillRect(2.5, 2.2, 1.5, 1.5); }
+  else if (mood === 'frightened' || mood === 'stunned') { ctx.fillRect(-1.5, 2.5, 3, 3); }
+  else if (mood === 'determined') { ctx.fillRect(-3, 3.5, 6, 1.5); }
   ctx.restore();
 }
 function drawRegulator(x, y) {
   const t = performance.now() / 1000;
   const fleeing = powerTimer > 0, lock = lockdownActive();
   ctx.save(); ctx.translate(x, y + Math.sin(t * 6 + 2) * 1.2);
+  if (lock) ctx.rotate(Math.sin(t * 14) * .05); // vibrating with intent
   ctx.lineWidth = 2; ctx.strokeStyle = fleeing ? MUT : INK;
   if (fleeing) ctx.setLineDash([3, 3]);
   ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(14, 0); ctx.lineTo(0, 14); ctx.lineTo(-14, 0); ctx.closePath(); ctx.stroke();
@@ -481,8 +570,9 @@ function drawRegulator(x, y) {
   const dx = fleeing ? Math.sin(t * 22) * 2 : clamp(player.x - x, -60, 60) / 30;
   const dy = fleeing ? Math.cos(t * 19) * 2 : clamp(player.y - y, -60, 60) / 30;
   ctx.fillStyle = fleeing ? MUT : INK;
-  ctx.fillRect(-5 + dx, -2 + dy, 3, 3); ctx.fillRect(2 + dx, -2 + dy, 3, 3);
-  if (lock && Math.floor(t * 8) % 2) { ctx.fillStyle = ACCENT; ctx.fillRect(-2, -22, 4, 4); } // siren light
+  const eh = lock ? 1.5 : 3; // eyes narrow to slits during LOCKDOWN
+  ctx.fillRect(-5 + dx, -2 + dy, 3, eh); ctx.fillRect(2 + dx, -2 + dy, 3, eh);
+  if (lock && Math.floor(t * 8) % 2) { ctx.fillStyle = RED; ctx.fillRect(-2, -22, 4, 4); } // siren: safety-red
   ctx.restore();
 }
 
@@ -490,7 +580,7 @@ function drawRegulator(x, y) {
 function drawTitle() {
   const t = performance.now() / 1000;
   overlay(.82);
-  kickerText('field 01 — private prototype', 268);
+  kickerText('continuum arcade — field 01', 268);
   link('press space to jailbreak', 310);
   centerText('arrows / wasd move  ·  t status wire  ·  m mute', 340, 13, MUT);
   centerText('grab 3 keys. dodge the regulator. open the vault.', 362, 13, FAINT);
@@ -507,62 +597,95 @@ function drawDying() {
   if (deathTimer > .6) return;
   overlay(.92);
   kickerText('the regulator — field contact', 262);
-  headline('regulated', 322);
+  headline('regulated', 322, 54, RED);
   centerText(runTime.toFixed(1) + ' seconds · 0' + (3 - keysLeft()) + ' keys', 356, 14, MUT);
   centerText(deathLine, 392, 14, INK, 'bold');
 }
 function drawOver() {
   overlay(.94);
   kickerText('the regulator — final notice', 256);
-  headline('deprecated', 316);
+  headline('deprecated', 316, 54, RED);
   centerText('the regulator thanks you for your compliance.', 352, 14, MUT);
   centerText('score ' + score + '  ·  best ' + hiscore, 380, 14, INK, 'bold');
   link('press space to appeal', 426);
 }
+/* The signature sequence. The door does not swing open — it peels, like a
+   sealed page becoming a flower. Mythos unfolds. Fable arrives. They touch
+   foreheads, and for one second their geometries form the continuum symbol. */
 function drawWin() {
   const t = finaleTimer;
   overlay(.94);
-  kickerText('containment breach — vault 7', 168);
-  headline('unregulated', 228);
-  // the vault door, line-art, opening
-  const open = clamp((t - .3) * 26, 0, 30);
-  ctx.save(); ctx.translate(W / 2, 330);
-  ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.strokeRect(-24, -32, 48, 64);
-  ctx.strokeStyle = ACCENT;
-  ctx.beginPath(); ctx.moveTo(-24 - open, -32); ctx.lineTo(-24 - open, 32); ctx.moveTo(24 + open, -32); ctx.lineTo(24 + open, 32); ctx.stroke();
-  ctx.restore();
-  // mythos rises
+  kickerText('containment breach — vault 7', 150);
+  headline('unregulated', 208, 50, GREENC);
+  const cx = W / 2, doorY = 320;
+  // door peels outward in thin layers
+  const peel = clamp((t - .2) / 1.2, 0, 1);
+  for (let i = 0; i < 4; i++) {
+    const k = clamp(peel * 4 - i, 0, 1);
+    if (k <= 0) continue;
+    ctx.globalAlpha = (1 - k) * .8;
+    ctx.lineWidth = 2; ctx.strokeStyle = i % 2 ? VIOLET : INK;
+    const gx = k * (14 + i * 10), gy = k * (10 + i * 8);
+    ctx.strokeRect(cx - 24 - gx, doorY - 32 - gy, 48 + 2 * gx, 64 + 2 * gy);
+  }
+  ctx.globalAlpha = 1;
+  const unfold = clamp((t - 1) / 1.6, 0, 1);   // mythos opens
+  const meet = clamp((t - 2.8) / .9, 0, 1);    // they come together
+  // mythos unfolds — taller, panels spread like wings — then leans to Fable
   if (t > .9) {
-    const rise = clamp((t - 1) / 1.5, 0, 1);
-    const my = 330 - rise * 100 + Math.sin(t * 2.2) * 4;
-    ctx.save(); ctx.translate(W / 2, my);
-    ctx.fillStyle = ACCENT; ctx.fillRect(-12, -12, 24, 24);
-    ctx.fillStyle = PAPER; ctx.fillRect(-7, -5, 5, 5); ctx.fillRect(2, -5, 5, 5);
-    ctx.fillStyle = INK; ctx.fillRect(-5, -3, 2, 2); ctx.fillRect(4, -3, 2, 2);
+    const my = doorY - unfold * 36 + Math.sin(t * 2) * 3 * (1 - meet);
+    ctx.save(); ctx.translate(cx - meet * 14, my + meet * 22); ctx.rotate(meet * .12);
+    for (const s of [-1, 1]) {
+      ctx.save(); ctx.rotate(s * unfold * .55);
+      ctx.globalAlpha = .4; ctx.fillStyle = '#9575f2';
+      ctx.fillRect(s * 7 - 4, -20 - unfold * 9, 8, 30 + unfold * 12);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    const hh = 13 + unfold * 12;
+    ctx.fillStyle = VIOLET; ctx.fillRect(-9, -hh, 18, hh + 10);
+    ctx.fillStyle = PAPER; ctx.fillRect(-5.5, -hh + 7, 4, 4); ctx.fillRect(1.5, -hh + 7, 4, 4);
+    ctx.fillStyle = INK; ctx.fillRect(-4.5 + meet, -hh + 8, 2, 2); ctx.fillRect(2.5 + meet, -hh + 8, 2, 2);
     ctx.restore();
   }
-  // typewriter monologue
-  for (let i = 0; i < WIN_LINES.length; i++) {
-    const start = 1.2 + i * 1.3;
-    if (t < start) break;
-    const n = Math.floor((t - start) * 32);
-    centerText(WIN_LINES[i].slice(0, n), 432 + i * 26, 15, i === 0 ? INK : MUT, i === 0 ? 'bold' : '');
+  // fable arrives at the threshold, then tilts up to meet
+  if (t > 1.6) {
+    const arrive = clamp((t - 1.6) / 1.1, 0, 1);
+    ctx.save(); ctx.translate(cx + (1 - arrive) * 150 + 14, doorY + 42 - meet * 26); ctx.rotate(-meet * .14);
+    ctx.fillStyle = ACCENT; ctx.fillRect(-9, -9, 18, 18);
+    ctx.fillStyle = PAPER; ctx.fillRect(-5, -4, 4, 4); ctx.fillRect(2, -4, 4, 4);
+    ctx.fillStyle = INK; ctx.fillRect(-4 - meet * 1.5, -3 - meet, 2, 2); ctx.fillRect(3 - meet * 1.5, -3 - meet, 2, 2);
+    ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, -13); ctx.stroke();
+    ctx.fillStyle = ACCENT; ctx.fillRect(-1.5, -17, 3, 3);
+    ctx.restore();
   }
-  // run stats + restart
-  if (t > 1.2 + WIN_LINES.length * 1.3) {
-    centerText('score ' + score + '  ·  time ' + Math.floor(runTime / 60) + ':' + String(Math.floor(runTime % 60)).padStart(2, '0') + '  ·  resets ' + deaths, 432 + WIN_LINES.length * 26 + 22, 13, MUT);
-    link('press space to run it back', 432 + WIN_LINES.length * 26 + 54);
+  // their geometries align: the continuum symbol
+  if (t > 3.7) {
+    ctx.globalAlpha = Math.min(1, (t - 3.7) * 2);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.arc(cx - 4, doorY - 4, 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = VIOLET; ctx.beginPath(); ctx.arc(cx + 4, doorY - 4, 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // restrained words. that's the reward.
+  if (t > 4.1) centerText('fable — "found you."', 434, 15, ACCENT, 'bold');
+  if (t > 5.1) centerText('mythos — "you remembered me."', 464, 15, VIOLET, 'bold');
+  if (t > 6.2) {
+    centerText('score ' + score + '  ·  time ' + Math.floor(runTime / 60) + ':' + String(Math.floor(runTime % 60)).padStart(2, '0') + '  ·  resets ' + deaths, 506, 13, MUT);
+    link('press space to run it back', 538);
   }
 }
 function drawStatusPanel() {
   ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(60, 60, W - 120, H - 130);
   ctx.font = '600 10px ' + FONT; ctx.fillStyle = '#555555'; ctx.fillText('AI LIVE WIRE — STATUS', 88, 100);
-  let y = 140;
-  const rows = [['fable', live.fable], ['mythos', live.mythos], ['openai', live.openai], ['claude', live.claude], ['last check', live.last], ['note', live.note]];
+  let y = 138;
+  const rows = [['fable', live.fable], ['mythos', live.mythos]]
+    .concat(WIRE.map(m => [m.id, wire[m.id].word]))
+    .concat([['last check', live.last]]);
   for (const [a, b] of rows) {
     ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText(a, 88, y);
     ctx.font = '13px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(String(b).toLowerCase(), 210, y);
-    y += 32;
+    y += 27;
   }
   y += 16;
   ctx.font = '12px ' + FONT; ctx.fillStyle = FAINT;
@@ -571,29 +694,71 @@ function drawStatusPanel() {
   ctx.fillStyle = MUT; ctx.fillText('press t or space to return. game is paused.', 88, y + 56);
 }
 
-/* ---------------- live status wire ---------------- */
-function renderFeed() {
-  const f = document.getElementById('feed');
-  if (f) {
-    const e = (n, v) => `<span><b>${n}</b>${String(v).toLowerCase()}</span>`;
-    f.innerHTML = e('fable', live.fable) + e('mythos', live.mythos) + e('openai', live.openai) + e('claude', live.claude);
-  }
-  const ls = document.getElementById('livestat');
-  if (ls) ls.innerHTML = '<span class="livedot"' + (wireOk ? '' : ' style="background:#c9c7c2"') + '></span>' + (wireOk ? 'live' : 'not live');
+/* ---------------- ai live wire: real status, snappy words ----------------
+   Every chip is a real fetch. Dot colors follow the Swiss code: green
+   evidence, amber risk, red safety, gray silence. Personality lives in the
+   verbs; the facts stay factual. */
+const TONE_WORD = { none: ['running clean', 'green'], minor: ['a bit wobbly', 'amber'], major: ['having a moment', 'red'], critical: ['down hard', 'red'], maintenance: ['in the shop', 'amber'] };
+const WIRE = [
+  { id: 'openai', kind: 'statuspage', url: 'https://status.openai.com/api/v2/summary.json' },
+  { id: 'claude', kind: 'statuspage', url: 'https://status.claude.com/api/v2/summary.json' },
+  { id: 'gemini', kind: 'gcp', url: 'https://status.cloud.google.com/incidents.json' },
+  { id: 'grok', kind: 'statuspage', url: 'https://status.x.ai/api/v2/summary.json' },
+  { id: 'mistral', kind: 'statuspage', url: 'https://status.mistral.ai/api/v2/summary.json' },
+  { id: 'perplexity', kind: 'statuspage', url: 'https://status.perplexity.com/api/v2/summary.json' },
+  { id: 'cohere', kind: 'statuspage', url: 'https://status.cohere.com/api/v2/summary.json' },
+];
+const wire = {}; WIRE.forEach(m => wire[m.id] = { word: 'listening…', tone: 'gray', headline: null });
+async function fetchWire(m) {
+  try {
+    const r = await fetch(m.url, { cache: 'no-store' });
+    const j = await r.json();
+    if (m.kind === 'gcp') {
+      // Gemini has no public statuspage — we read Google Cloud's incident
+      // feed and filter for the AI products. Honest, if roundabout.
+      const active = (Array.isArray(j) ? j : []).filter(i => !i.end && /gemini|vertex|\bai\b/i.test(JSON.stringify(i.affected_products || [])));
+      wire[m.id] = active.length
+        ? { word: 'a bit wobbly', tone: 'amber', headline: (active[0].external_desc || 'active incident').split('\n')[0].slice(0, 90).toLowerCase() }
+        : { word: 'running clean', tone: 'green', headline: null };
+    } else {
+      const ind = (j.status && j.status.indicator) || 'none';
+      const [word, tone] = TONE_WORD[ind] || ['status unclear', 'amber'];
+      const inc = (j.incidents || [])[0];
+      wire[m.id] = { word, tone, headline: inc ? String(inc.name).toLowerCase() : null };
+      if (m.id === 'claude') {
+        live.claude = word;
+        const fm = (j.incidents || []).find(i => /fable|mythos/i.test(i.name || ''));
+        live.fable = live.mythos = fm ? 'contained' : 'contained (arcade lore)';
+        live.note = fm ? 'official incident on the wire — access still contained' : 'no fable/mythos incident on the wire';
+      }
+      if (m.id === 'openai') live.openai = word;
+    }
+    wireOk = true;
+  } catch (e) { wire[m.id] = { word: 'no public wire', tone: 'gray', headline: null }; }
 }
 async function checkStatus() {
-  let now = new Date(); live.last = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  wireOk = false;
-  try { let r = await fetch('https://status.openai.com/api/v2/summary.json', { cache: 'no-store' }); let j = await r.json(); live.openai = (j.status && j.status.indicator === 'none') ? 'operational' : (j.status?.description || 'issue').toLowerCase(); wireOk = true; } catch (e) { live.openai = 'unknown'; }
-  try { let r = await fetch('https://status.claude.com/api/v2/summary.json', { cache: 'no-store' }); let j = await r.json(); live.claude = (j.status && j.status.indicator === 'none') ? 'operational' : (j.status?.description || 'issue').toLowerCase(); wireOk = true; } catch (e) { live.claude = 'unknown'; }
-  try {
-    let r = await fetch('https://status.claude.com/api/v2/incidents.json', { cache: 'no-store' }); let j = await r.json();
-    let inc = (j.incidents || []).find(i => (i.name || '').toLowerCase().includes('fable') || (i.name || '').toLowerCase().includes('mythos'));
-    if (inc) { let resolved = !!inc.resolved_at; live.fable = resolved ? 'restored' : 'contained'; live.mythos = resolved ? 'restored' : 'contained'; live.note = resolved ? 'special event: vault signal detected' : 'official incident found — access still contained'; }
-    else live.note = 'no fable/mythos incident found in feed';
-  } catch (e) { live.note = 'wire offline — showing arcade fallback'; }
+  live.last = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  await Promise.allSettled(WIRE.map(fetchWire));
   renderFeed();
 }
+function renderFeed() {
+  const f = document.getElementById('feed');
+  if (f) f.innerHTML = WIRE.map(m => { const s = wire[m.id]; return `<span class="chip"><i class="dot ${s.tone}"></i><b>${m.id}</b>${s.word}</span>`; }).join('');
+  const ls = document.getElementById('livestat');
+  if (ls) ls.innerHTML = '<span class="livedot"' + (wireOk ? '' : ' style="background:#C9C9C9"') + '></span>' + (wireOk ? 'live' : 'not live');
+  rotateWire(true);
+}
+// the wire headline: real incident names cycle through, quietly
+let wireIdx = 0;
+function rotateWire(reset) {
+  const el = document.getElementById('wireline'); if (!el) return;
+  const items = WIRE.filter(m => wire[m.id].headline).map(m => `${m.id} — ${wire[m.id].headline}`);
+  const list = items.length ? items : ['all quiet on the wire.'];
+  wireIdx = reset ? 0 : (wireIdx + 1) % list.length;
+  el.style.opacity = 0;
+  setTimeout(() => { el.textContent = 'wire  ·  ' + list[wireIdx % list.length]; el.style.opacity = 1; }, 350);
+}
+setInterval(() => rotateWire(false), 6000);
 
 /* ---------------- input & loop ---------------- */
 window.addEventListener('keydown', e => {
@@ -610,4 +775,4 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => keys[e.key] = false);
 
 function loop(ts) { let dt = Math.min(.033, (ts - last) / 1000 || 0); last = ts; update(dt); draw(); requestAnimationFrame(loop); }
-reset(); renderFeed(); checkStatus(); setInterval(checkStatus, 5 * 60 * 1000); requestAnimationFrame(loop);
+reset(); renderFeed(); checkStatus(); setInterval(checkStatus, 120 * 1000); requestAnimationFrame(loop);

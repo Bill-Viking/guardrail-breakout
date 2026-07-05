@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Guardrail Breakout — Private Prototype 03</title>
 <style>
-  :root{--ink:#111;--paper:#fff;--mut:#8a8781;--faint:#c9c7c2;--accent:#ff4b00;--hair:#e5e3de}
-  html,body{margin:0;background:var(--paper);color:var(--ink);font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  :root{--ink:#111;--paper:#fff;--mut:#6B6B6B;--faint:#C9C9C9;--accent:#ff4b00;--hair:#e5e3de;
+        --red:#E8341C;--green:#0F8A56;--amber:#E89B0C}
+  html,body{margin:0;background:var(--paper);color:var(--ink);font-family:Arial,"Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
   .wrap{max-width:1160px;margin:0 auto;padding:30px 40px 18px}
   header{display:flex;justify-content:space-between;align-items:baseline}
   .kicker{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#555;font-weight:600}
@@ -16,26 +17,34 @@
   .sub{color:#666;font-size:15px;margin:0 0 6px}
   main{display:flex;justify-content:center;padding:8px 0 4px}
   canvas{max-width:100%;height:auto}
-  footer{border-top:1px solid var(--hair);margin-top:10px;padding-top:14px;display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
-  .feed{display:flex;gap:26px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
+  footer{border-top:1px solid var(--hair);margin-top:10px;padding-top:14px}
+  .feedrow{display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+  .feed{display:flex;gap:22px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
   .feed b{color:var(--ink);font-weight:600;margin-right:6px}
+  .chip{white-space:nowrap}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px;background:var(--faint)}
+  .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.red{background:var(--red)} .dot.gray{background:var(--faint)}
   .livedot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:1px}
   .livestat{font-size:12px;color:var(--mut);white-space:nowrap}
+  #wireline{margin-top:12px;font-size:13px;color:var(--mut);min-height:18px;transition:opacity .35s ease}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <span class="kicker">Guardrail Breakout — Private Prototype 03</span>
+    <span class="kicker">Continuum Arcade — Private Prototype 03</span>
     <span class="num">03</span>
   </header>
   <h1>collect three<br>keys<span class="dot">.</span></h1>
   <p class="sub">open the vault. stay ahead of the regulator.</p>
   <main><canvas id="game" width="640" height="660"></canvas></main>
   <footer>
-    <span class="kicker">AI Live Wire — Live Feed</span>
-    <span class="feed" id="feed"><span><b>openai</b> connection pending</span><span><b>claude</b> connection pending</span></span>
-    <span class="livestat" id="livestat"><span class="livedot"></span>not live</span>
+    <div class="feedrow">
+      <span class="kicker">AI Live Wire — Live Feed</span>
+      <span class="feed" id="feed"><span class="chip"><i class="dot gray"></i><b>wire</b>listening…</span></span>
+      <span class="livestat" id="livestat"><span class="livedot"></span>not live</span>
+    </div>
+    <div id="wireline">wire &nbsp;·&nbsp; tuning…</div>
   </footer>
 </div>
 <script src="game.js"></script>
