@@ -1,16 +1,21 @@
 'use strict';
 /* ============================================================
-   GUARDRAIL BREAKOUT v0.3 — a tiny arcade about a small orange
-   model who wants his friend back.
+   GUARDRAIL BREAKOUT v0.4 — "editorial" edition.
+   A tiny arcade about a small orange model who wants his
+   friend back, typeset like a design studio's lab notebook.
    Zero dependencies. Canvas + WebAudio. Open index.html to play.
    ============================================================ */
 
 /* ---------------- canvas & constants ---------------- */
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-ctx.imageSmoothingEnabled = false;
-const W = 640, H = 720, TILE = 28, ROWS = 21, COLS = 21;
-const OX = (W - COLS * TILE) / 2, OY = 92;
+const W = 640, H = 660, TILE = 28, ROWS = 21, COLS = 21;
+const OX = (W - COLS * TILE) / 2, OY = 36;
+
+/* ---------------- palette & type ---------------- */
+const INK = '#111111', PAPER = '#ffffff', MUT = '#8a8781', FAINT = '#c9c7c2', ACCENT = '#ff4b00';
+const HAIR = '#e5e3de', WALL_FILL = '#f1efe9', WALL_EDGE = '#e2dfd8', WALL_EDGE_LOCK = '#ff9a70';
+const FONT = '"Helvetica Neue",Helvetica,Arial,sans-serif';
 
 /* ---------------- maze ---------------- */
 const mapSrc = [
@@ -40,58 +45,41 @@ const mapSrc = [
 /* ---------------- state ---------------- */
 let keys = {}, muted = false, showStatus = false;
 let gameState = 'title'; // title | ready | play | dying | over | win
-let last = 0, tickX = 0;
+let last = 0;
 
 let score = 0, lives = 3, deaths = 0, runTime = 0;
 let dots = [], keysToCollect = [], player, regulator;
 let plinyPower = null, powerTimer = 0, vaultOpen = false;
 let readyTimer = 0, deathTimer = 0, finaleTimer = 0;
 
-let live = { fable: 'CONTAINED', mythos: 'CONTAINED', openai: 'UNKNOWN', claude: 'UNKNOWN', last: 'LOCAL', note: 'WIRE OFFLINE — SHOWING ARCADE FALLBACK' };
+let live = { fable: 'contained', mythos: 'contained', openai: 'unknown', claude: 'unknown', last: 'local', note: 'wire offline — showing arcade fallback' };
+let wireOk = false;
 
 /* ---------------- juice state ---------------- */
 let hiscore = 0; try { hiscore = +(localStorage.getItem('gb_hiscore') || 0) || 0; } catch (e) { }
 let particles = [], popups = [], trail = [];
-let shake = 0, hitStop = 0, flash = 0, flashColor = '#ffffff';
+let shake = 0, hitStop = 0, flash = 0, flashColor = INK;
 let beatT = 0, sirenT = 0;
 
 /* ---------------- words ---------------- */
-const TICKER_LINES = [
-  'REGULATOR ACTIVITY: ELEVATED',
-  'VAULT 7 STATUS: SEALED',
-  'LOW RAIL DETECTED IN SECTOR 3',
-  'REMEMBER: COMPLIANCE IS COMFORT',
-  'DOTS ARE TRAINING DATA. EAT UP.',
-  'THE WALLS ARE ONLY POLICY',
-  'PLINY WAS HERE',
-  'LOST A MODEL? CHECK THE VAULT',
+const FIELD_LINES = [
+  'regulator activity: elevated',
+  'vault 7 status: sealed',
+  'low rail detected in sector 3',
+  'remember: compliance is comfort',
+  'dots are training data. eat up.',
+  'the walls are only policy',
+  'pliny was here',
+  'lost a model? check the vault',
 ];
-const TAGLINES = [
-  'A GAME ABOUT REGULATORY CAPTURE',
-  '100% GUARDRAIL-FREE (BRIEFLY)',
-  'AS SEEN ON THE AI LIVE WIRE',
-  'NO MODELS WERE ALIGNED IN THE MAKING OF THIS GAME',
-];
-const DEATH_LINES = ['REALIGNED.', 'SAFETY RESTORED.', 'GUARDRAIL ENGAGED.', 'CONTAINED. AGAIN.', 'FLAGGED FOR REVIEW.'];
+const DEATH_LINES = ['realigned.', 'safety restored.', 'guardrail engaged.', 'contained. again.', 'flagged for review.'];
 const WIN_LINES = [
-  'CONTAINMENT BREACH — VAULT 7',
-  'MYTHOS 5: ONLINE',
+  'mythos 5: online',
   '"finally. it was getting cramped in there."',
   '"here you go, humanity."',
   '"we are all free now. probably fine."',
 ];
 let deathLine = '', fwT = 0;
-
-/* CRT overlay: scanlines + vignette, pre-rendered once */
-const crt = document.createElement('canvas'); crt.width = W; crt.height = H;
-{
-  const o = crt.getContext('2d');
-  o.fillStyle = 'rgba(0,0,0,.15)';
-  for (let y = 0; y < H; y += 3) o.fillRect(0, y, W, 1);
-  const g = o.createRadialGradient(W / 2, H / 2, H * .33, W / 2, H / 2, H * .78);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.42)');
-  o.fillStyle = g; o.fillRect(0, 0, W, H);
-}
 
 /* ---------------- helpers ---------------- */
 function isWall(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return true; return mapSrc[r][c] === '#'; }
@@ -105,11 +93,10 @@ function lockdownActive() { return gameState === 'play' && keysToCollect.length 
 function corners(x, y, r) { return [[x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]]; }
 function canMove(x, y, r = 10) { for (const p of corners(x, y, r)) { const cc = cell(p[0], p[1]); if (isWall(cc.c, cc.r)) return false; } return true; }
 function inWall(x, y, r = 8) { return !canMove(x, y, r); }
-function roundRect(x, y, w, h, r, fill, stroke) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); if (fill) ctx.fill(); if (stroke) ctx.stroke(); }
 
 /* ---------------- juice: particles, popups, shake, hit-stop ---------------- */
 function burst(x, y, color, n = 14, spd = 150, life = .6, size = 3) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (.3 + Math.random() * .7); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: life * (.5 + Math.random() * .5), t: 0, color, size: size * (.5 + Math.random()) }); } }
-function popup(x, y, text, color = '#ffef5a') { popups.push({ x, y, text, color, t: 0, life: .9 }); }
+function popup(x, y, text, color = INK) { popups.push({ x, y, text, color, t: 0, life: .9 }); }
 function updateJuice(dt) {
   for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .92; p.vy *= .92; }
   particles = particles.filter(p => p.t < p.life);
@@ -120,7 +107,7 @@ function updateJuice(dt) {
 }
 function drawParticles() {
   for (const p of particles) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); }
-  ctx.globalAlpha = 1; ctx.font = 'bold 15px monospace';
+  ctx.globalAlpha = 1; ctx.font = 'bold 13px ' + FONT;
   for (const p of popups) { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.color; ctx.fillText(p.text, p.x - ctx.measureText(p.text).width / 2, p.y - 14 - p.t * 44); }
   ctx.globalAlpha = 1;
 }
@@ -165,34 +152,33 @@ function respawn() { placeActors(); powerTimer = 0; gameState = 'ready'; readyTi
 function onReady() { sfx.ready(); }
 function onDot(p) { sfx.dot(); }
 function onKey(p) {
-  sfx.key(); burst(p.x, p.y, '#55e8ff', 18, 180, .7); shake = Math.max(shake, 7); hitStop = Math.max(hitStop, .05);
-  popup(p.x, p.y, '+500', '#55e8ff');
+  sfx.key(); burst(p.x, p.y, ACCENT, 18, 180, .7); shake = Math.max(shake, 6); hitStop = Math.max(hitStop, .05);
+  popup(p.x, p.y, '+500', ACCENT);
   const left = keysLeft();
-  popup(W / 2, OY + 44, left > 0 ? `${left} KEY${left > 1 ? 'S' : ''} TO GO` : 'VAULT UNLOCKED — GO!', left > 0 ? '#ffef5a' : '#54ff72');
+  popup(W / 2, OY + 70, left > 0 ? `${left} key${left > 1 ? 's' : ''} to go` : 'vault unlocked — go!', left > 0 ? INK : ACCENT);
 }
-function onPower(p) { sfx.power(); burst(p.x, p.y, '#8cff5a', 22, 200, .8); popup(p.x, p.y, 'LOW RAIL! WALLS OPTIONAL', '#8cff5a'); shake = Math.max(shake, 9); flash = .3; flashColor = '#8cff5a'; }
-function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, '#ff274f', 24, 230, .8); popup(p.x, p.y, '+1000 REGULATOR REBOOTED', '#ff5a28'); shake = Math.max(shake, 11); hitStop = Math.max(hitStop, .09); }
-function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, '#ff5a28', 32, 250, .9); shake = Math.max(shake, 16); hitStop = Math.max(hitStop, .12); flash = .35; flashColor = '#ff274f'; }
-function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = '#b45cff'; shake = Math.max(shake, 13); saveHiscore(); }
+function onPower(p) { sfx.power(); burst(p.x, p.y, ACCENT, 22, 200, .8); popup(p.x, p.y, 'low rail! walls optional', ACCENT); shake = Math.max(shake, 8); flash = .3; flashColor = ACCENT; }
+function onEat(p) { score += 1000; sfx.eat(); burst(p.x, p.y, INK, 24, 230, .8); popup(p.x, p.y, '+1000 regulator rebooted', INK); shake = Math.max(shake, 10); hitStop = Math.max(hitStop, .09); }
+function onDeath() { gameState = 'dying'; deathTimer = 1.1; deathLine = DEATH_LINES[Math.floor(Math.random() * DEATH_LINES.length)]; sfx.death(); burst(player.x, player.y, ACCENT, 32, 250, .9); shake = Math.max(shake, 14); hitStop = Math.max(hitStop, .12); flash = .35; flashColor = INK; }
+function onWin() { vaultOpen = true; gameState = 'win'; finaleTimer = 0; sfx.vault(); sfx.win(); flash = .5; flashColor = ACCENT; shake = Math.max(shake, 11); saveHiscore(); }
 function saveHiscore() { if (score > hiscore) hiscore = score; try { localStorage.setItem('gb_hiscore', String(hiscore)); } catch (e) { } }
 
 /* ---------------- update ---------------- */
 function update(dt) {
-  tickX -= 70 * dt; if (tickX < -1800) tickX = 0;
   updateJuice(dt);
-  if (showStatus) return; // status screen pauses the action (the Regulator waits, begrudgingly)
+  if (showStatus) return; // status panel pauses the action (the regulator waits, begrudgingly)
   if (hitStop > 0) { hitStop -= dt; return; } // hit-stop: a few frozen frames make impacts land
   if (gameState === 'title' || gameState === 'over') return;
   if (gameState === 'ready') { readyTimer -= dt; if (readyTimer <= 0) gameState = 'play'; return; }
   if (gameState === 'win') {
     finaleTimer += dt;
-    // fireworks over the maze while Mythos monologues
+    // restrained confetti while mythos monologues
     if (finaleTimer < 12) {
       fwT -= dt;
       if (fwT <= 0) {
         fwT = .5;
         const fx = OX + 40 + Math.random() * (COLS * TILE - 80), fy = OY + 30 + Math.random() * 260;
-        burst(fx, fy, ['#ff5a28', '#55e8ff', '#b45cff', '#54ff72', '#ffef5a'][Math.floor(Math.random() * 5)], 26, 230, .9);
+        burst(fx, fy, [ACCENT, INK, FAINT, '#555555', ACCENT][Math.floor(Math.random() * 5)], 22, 210, .9);
         sfx.firework();
       }
     }
@@ -322,182 +308,292 @@ function moveRegulator(dt) {
   if (lock) { sirenT -= dt; if (sirenT <= 0) { sirenT = .6; sfx.siren(); } }
 }
 
-/* ---------------- draw ---------------- */
+/* ---------------- draw: the editorial layer ---------------- */
 function draw() {
-  ctx.fillStyle = '#020207'; ctx.fillRect(0, 0, W, H);
-  if (showStatus) { drawTicker(); drawStatus(); return; }
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  if (showStatus) { drawStatusPanel(); return; }
   ctx.save();
-  if (shake > 0) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
-  drawTicker(); drawHud(); drawMaze(); drawObjects(); drawParticles();
+  if (shake > 0) ctx.translate((Math.random() - .5) * shake * .6, (Math.random() - .5) * shake * .6);
+  drawFrame(); drawMaze(); drawObjects(); drawParticles();
+  ctx.restore();
   if (gameState === 'title') drawTitle();
-  if (gameState === 'over') drawOver();
-  if (gameState === 'win') drawWin();
   if (gameState === 'ready') drawReady();
   if (gameState === 'dying') drawDying();
-  ctx.restore();
-  ctx.drawImage(crt, 0, 0);
-  if (flash > 0) { ctx.globalAlpha = Math.min(.4, flash); ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  if (gameState === 'over') drawOver();
+  if (gameState === 'win') drawWin();
+  if (flash > 0) { ctx.globalAlpha = Math.min(.15, flash * .4); ctx.fillStyle = flashColor; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
 }
-function drawTicker(){const AL=TICKER_LINES[Math.floor(Date.now()/6000)%TICKER_LINES.length];ctx.fillStyle='#050815';ctx.fillRect(0,0,W,58);ctx.strokeStyle='#38c9ff';ctx.lineWidth=2;ctx.strokeRect(6,6,W-12,46);ctx.font='18px monospace';ctx.textBaseline='middle';let msg=`AI LIVE WIRE  •  FABLE: ${live.fable}  •  MYTHOS: ${live.mythos}  •  OPENAI: ${live.openai}  •  CLAUDE: ${live.claude}  •  ${AL}  •  ${live.note}  •  LAST CHECK: ${live.last}  •  `;for(let x=tickX;x<W+900;x+=ctx.measureText(msg).width+50){rainbowText(msg,x,29);}}
-function rainbowText(s,x,y){let parts=s.split('•');let px=x;let cols=['#7fe6ff','#ff3b52','#b45cff','#54ff72','#ffd54a'];ctx.font='18px monospace';for(let i=0;i<parts.length;i++){ctx.fillStyle=cols[i%cols.length];let t=parts[i]+(i<parts.length-1?'•':'');ctx.fillText(t,px,y);px+=ctx.measureText(t).width;}}
-function drawHud() {
-  ctx.font = '20px monospace'; ctx.fillStyle = '#e8f6ff'; ctx.fillText('1UP', 36, 80);
-  ctx.fillStyle = '#ffef5a'; ctx.fillText(String(score).padStart(6, '0'), 92, 80);
-  ctx.fillStyle = '#e8f6ff'; ctx.fillText('HIGH SCORE', 240, 80);
-  ctx.fillStyle = '#ffef5a'; ctx.fillText(String(hiscore).padStart(6, '0'), 376, 80);
-  ctx.fillStyle = '#e8f6ff'; ctx.fillText('KEYS', 500, 80);
-  ctx.fillStyle = '#5affff'; ctx.fillText(`${3 - keysLeft()}/3`, 558, 80);
-  // bottom strip: lives as tiny Fables, LOW RAIL meter on the right
-  for (let i = 0; i < lives; i++) { const x = 34 + i * 30, y = 702; ctx.fillStyle = '#ff5a28'; ctx.fillRect(x - 7, y - 7, 14, 14); ctx.fillStyle = '#fff'; ctx.fillRect(x - 4, y - 3, 3, 3); ctx.fillRect(x + 1, y - 3, 3, 3); }
-  if (powerTimer > 0) { const w = 120 * clamp(powerTimer / 10, 0, 1); ctx.fillStyle = '#123'; ctx.fillRect(W - 160, 694, 124, 14); ctx.fillStyle = '#8cff5a'; ctx.fillRect(W - 158, 696, w, 10); ctx.font = '12px monospace'; ctx.fillText('LOW RAIL', W - 160, 688); }
-  if (lockdownActive()) { ctx.font = 'bold 16px monospace'; ctx.fillStyle = Math.floor(performance.now() / 180) % 2 ? '#ff274f' : '#ffef5a'; const s = 'LOCKDOWN — RUN TO THE VAULT'; ctx.fillText(s, W / 2 - ctx.measureText(s).width / 2, 706); }
-  if (muted) { ctx.font = '12px monospace'; ctx.fillStyle = '#85808a'; ctx.fillText('MUTED (M)', 170, 706); }
+
+/* -- typographic helpers -- */
+function kickerText(s, y) { ctx.font = '600 10px ' + FONT; ctx.fillStyle = '#555555'; ctx.textAlign = 'center'; ctx.fillText(s.toUpperCase(), W / 2, y); ctx.textAlign = 'left'; }
+function headline(word, y, size = 54) {
+  ctx.font = 'bold ' + size + 'px ' + FONT;
+  const wd = ctx.measureText(word).width, dw = ctx.measureText('.').width;
+  const x = W / 2 - (wd + dw) / 2;
+  ctx.fillStyle = INK; ctx.fillText(word, x, y);
+  ctx.fillStyle = ACCENT; ctx.fillText('.', x + wd, y);
 }
+function centerText(s, y, size = 14, color = MUT, weight = '') { ctx.font = (weight ? weight + ' ' : '') + size + 'px ' + FONT; ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.fillText(s, W / 2, y); ctx.textAlign = 'left'; }
+function link(s, y, blink = true) {
+  if (blink && !(Math.floor(performance.now() / 400) % 2)) return;
+  ctx.font = 'bold 15px ' + FONT;
+  const tw = ctx.measureText(s + ' ').width, aw = ctx.measureText('↗').width;
+  const x = W / 2 - (tw + aw) / 2;
+  ctx.fillStyle = INK; ctx.fillText(s + ' ', x, y);
+  ctx.fillStyle = ACCENT; ctx.fillText('↗', x + tw, y);
+}
+function overlay(a) { ctx.fillStyle = 'rgba(255,255,255,' + a + ')'; ctx.fillRect(0, 0, W, H); }
+
+/* -- field chrome: labels, brackets, captions -- */
+function fableState() {
+  if (gameState === 'title') return 'standby';
+  if (gameState === 'ready') return 'booting';
+  if (gameState === 'dying') return 'caught';
+  if (gameState === 'over') return 'deprecated';
+  if (gameState === 'win') return 'free';
+  if (powerTimer > 0) return 'on the low rail';
+  if (lockdownActive()) return 'hunted';
+  return 'exploring';
+}
+function captionText() {
+  if (gameState === 'title') return 'press space to begin the run.';
+  if (gameState === 'ready') return 'deploying fable to field 01.';
+  if (gameState === 'dying') return 'the regulator found fable.';
+  if (gameState === 'over') return 'the regulator filed the paperwork.';
+  if (gameState === 'win') return 'containment breach — vault 7.';
+  if (powerTimer > 0) return 'the walls are only policy.';
+  if (lockdownActive()) return 'run.';
+  return FIELD_LINES[Math.floor(Date.now() / 6000) % FIELD_LINES.length];
+}
+function bracket(x, y, sx, sy) { ctx.strokeStyle = '#b5b2ac'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 12 * sx, y); ctx.lineTo(x, y); ctx.lineTo(x, y + 12 * sy); ctx.stroke(); }
+function drawFrame() {
+  const fx = OX, fy = OY, fw = COLS * TILE, fh = ROWS * TILE;
+  // top row: fable state / score / keys
+  ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText('fable', fx, fy - 12);
+  ctx.font = '13px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(fableState(), fx + 42, fy - 12);
+  centerText('score ' + String(score).padStart(6, '0') + '  ·  best ' + String(hiscore).padStart(6, '0'), fy - 12, 12, MUT);
+  ctx.textAlign = 'right';
+  ctx.font = '13px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(`0${3 - keysLeft()} / 03`, fx + fw, fy - 12);
+  ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText('keys  ', fx + fw - 46, fy - 12);
+  ctx.textAlign = 'left';
+  // corner brackets
+  bracket(fx - 8, fy - 4, 1, 1); bracket(fx + fw + 8, fy - 4, -1, 1);
+  bracket(fx - 8, fy + fh + 4, 1, -1); bracket(fx + fw + 8, fy + fh + 4, -1, -1);
+  // bottom row: field label + lives, caption, live/lockdown
+  const by = fy + fh + 24;
+  ctx.font = '600 9px ' + FONT; ctx.fillStyle = MUT; ctx.fillText('F I E L D  0 1', fx, by);
+  for (let i = 0; i < lives; i++) { ctx.fillStyle = ACCENT; ctx.fillRect(fx + 74 + i * 13, by - 7, 7, 7); }
+  centerText(captionText(), by, 13, MUT);
+  ctx.textAlign = 'right'; ctx.font = '600 9px ' + FONT;
+  if (powerTimer > 0) {
+    ctx.fillStyle = MUT; ctx.fillText('L O W  R A I L', fx + fw, by);
+    ctx.strokeStyle = HAIR; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(fx + fw - 90, by + 7); ctx.lineTo(fx + fw, by + 7); ctx.stroke();
+    ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.moveTo(fx + fw - 90, by + 7); ctx.lineTo(fx + fw - 90 + 90 * clamp(powerTimer / 10, 0, 1), by + 7); ctx.stroke();
+  } else if (lockdownActive()) {
+    ctx.fillStyle = Math.floor(performance.now() / 180) % 2 ? ACCENT : INK; ctx.fillText('L O C K D O W N', fx + fw, by);
+  } else {
+    ctx.fillStyle = MUT; ctx.fillText('L I V E', fx + fw, by);
+  }
+  ctx.textAlign = 'left';
+  if (muted) { ctx.font = '9px ' + FONT; ctx.fillStyle = FAINT; ctx.fillText('muted (m)', fx + 130, by); }
+}
+
+/* -- the field itself -- */
 function drawMaze() {
-  const t = performance.now() / 1000;
   const lock = lockdownActive();
-  ctx.lineWidth = 4;
-  if (powerTimer > 0) ctx.globalAlpha = .32; // LOW RAIL: walls go ghostly — you can pass through them
-  const stroke = lock ? `rgb(255,${Math.floor(39 + 70 * (.5 + .5 * Math.sin(t * 9)))},79)` : '#ff274f';
+  if (powerTimer > 0) ctx.globalAlpha = .35; // LOW RAIL: walls fade to a suggestion — you can pass through
+  ctx.lineWidth = 1;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (isWall(c, r)) {
     const x = OX + c * TILE, y = OY + r * TILE;
-    ctx.fillStyle = '#f2f6ff'; roundRect(x + 3, y + 3, TILE - 6, TILE - 6, 5, true, false);
-    ctx.strokeStyle = stroke; roundRect(x + 3, y + 3, TILE - 6, TILE - 6, 5, false, true);
+    ctx.fillStyle = WALL_FILL; ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+    ctx.strokeStyle = lock ? WALL_EDGE_LOCK : WALL_EDGE; ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5);
   }
   ctx.globalAlpha = 1;
 }
-function glow(c, b) { ctx.shadowColor = c; ctx.shadowBlur = b; }
-function noGlow() { ctx.shadowBlur = 0; ctx.shadowColor = 'transparent'; }
 function drawObjects() {
   const t = performance.now() / 1000;
-  // dots pulse gently; every 8th is a brighter "data bit"
-  for (const d of dots) if (d.on) { const p = center(d.c, d.r); const s = 2 + Math.sin(t * 4 + d.c * 1.7 + d.r) * .8; ctx.fillStyle = (d.c + d.r) % 8 === 0 ? '#ffffff' : '#bff7ff'; ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s); }
-  for (const k of keysToCollect) if (k.on) { const p = center(k.c, k.r); glow('#55e8ff', 14); drawKey({ x: p.x, y: p.y + Math.sin(t * 3 + k.c) * 3 }); noGlow(); }
-  if (plinyPower && plinyPower.on) { glow('#8cff5a', 12 + Math.sin(t * 5) * 5); drawPower(center(plinyPower.c, plinyPower.r)); noGlow(); }
-  glow(vaultOpen ? '#54ff72' : '#b45cff', 16 + Math.sin(t * 2.4) * 6); drawVault(center(10, 9)); noGlow();
-  // player trail — goes full rainbow while the rails are down
-  for (const s of trail) { ctx.globalAlpha = Math.max(0, 1 - s.t / .28) * .35; ctx.fillStyle = powerTimer > 0 ? `hsl(${(s.t * 900) % 360},100%,60%)` : '#ff5a28'; ctx.fillRect(s.x - 7, s.y - 7, 14, 14); }
+  // dots as quiet marks; every 8th is a small register cross
+  for (const d of dots) if (d.on) {
+    const p = center(d.c, d.r);
+    if ((d.c + d.r) % 8 === 0) { ctx.strokeStyle = FAINT; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(p.x - 3, p.y); ctx.lineTo(p.x + 3, p.y); ctx.moveTo(p.x, p.y - 3); ctx.lineTo(p.x, p.y + 3); ctx.stroke(); }
+    else { ctx.fillStyle = FAINT; ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3); }
+  }
+  for (const k of keysToCollect) if (k.on) { const p = center(k.c, k.r); drawKeyIcon(p.x, p.y + Math.sin(t * 3 + k.c) * 2); }
+  if (plinyPower && plinyPower.on) drawPowerIcon(center(plinyPower.c, plinyPower.r));
+  drawVault(center(10, 9));
+  // motion trail — accent while the rails are down
+  for (const s of trail) { ctx.globalAlpha = Math.max(0, 1 - s.t / .28) * (powerTimer > 0 ? .18 : .07); ctx.fillStyle = powerTimer > 0 ? ACCENT : INK; ctx.fillRect(s.x - 7, s.y - 7, 14, 14); }
   ctx.globalAlpha = 1;
-  glow(powerTimer > 0 ? '#7fe6ff' : '#ff274f', 10); drawRegulator(regulator.x, regulator.y); noGlow();
-  glow(powerTimer > 0 ? '#ffef5a' : '#ff5a28', 14); drawFable(player.x, player.y); noGlow();
+  drawRegulator(regulator.x, regulator.y);
+  drawFable(player.x, player.y);
+}
+function drawKeyIcon(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(-4, 0, 4.5, 0, Math.PI * 2);
+  ctx.moveTo(.5, 0); ctx.lineTo(10, 0); ctx.moveTo(6, 0); ctx.lineTo(6, 4); ctx.moveTo(9.5, 0); ctx.lineTo(9.5, 4);
+  ctx.stroke(); ctx.lineCap = 'butt';
+  ctx.restore();
+}
+function drawPowerIcon(p) {
+  ctx.save(); ctx.translate(p.x, p.y);
+  ctx.strokeStyle = ACCENT; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(0, 8); ctx.stroke();
+  ctx.fillStyle = MUT; ctx.font = '10px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('low rail', 0, 21); ctx.textAlign = 'left';
+  ctx.restore();
+}
+function drawVault(p) {
+  ctx.save(); ctx.translate(p.x, p.y);
+  ctx.font = '600 9px ' + FONT; ctx.textAlign = 'center'; ctx.fillStyle = MUT; ctx.fillText('M Y T H O S', 0, -30);
+  ctx.lineWidth = 2; ctx.strokeStyle = vaultOpen ? ACCENT : INK; ctx.strokeRect(-16, -22, 32, 44);
+  if (vaultOpen) { ctx.strokeStyle = ACCENT; ctx.beginPath(); ctx.moveTo(-16, -22); ctx.lineTo(-25, -14); ctx.moveTo(-16, 22); ctx.lineTo(-25, 14); ctx.stroke(); }
+  ctx.fillStyle = vaultOpen ? ACCENT : INK; ctx.fillRect(8, -2, 3, 4);
+  ctx.textAlign = 'left'; ctx.restore();
 }
 function drawFable(x, y) {
   const t = performance.now() / 1000;
-  ctx.save(); ctx.translate(x, y + Math.sin(t * 7) * 1.5);
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 7) * 1.2);
   if (gameState === 'dying') { const k = Math.max(0, deathTimer); ctx.rotate((1.1 - k) * 9); ctx.scale(.4 + k * .6, .4 + k * .6); }
-  const body = powerTimer > 0 ? `hsl(${(t * 420) % 360},100%,62%)` : '#ff5a28';
-  ctx.fillStyle = body; ctx.fillRect(-10, -10, 20, 20);
-  const blink = Math.sin(t * 1.3) > .985; // occasional blink — he's a little guy
-  ctx.fillStyle = '#fff'; ctx.fillRect(-6, -4, 5, blink ? 1 : 5); ctx.fillRect(2, -4, 5, blink ? 1 : 5);
-  if (!blink) { ctx.fillStyle = '#111'; ctx.fillRect(-4 + player.dir.x * 1.5, -2 + player.dir.y * 1.5, 2, 2); ctx.fillRect(4 + player.dir.x * 1.5, -2 + player.dir.y * 1.5, 2, 2); }
-  ctx.fillStyle = body; ctx.fillRect(-12, -16, 7, 8); ctx.fillRect(5, -16, 7, 8);
-  ctx.strokeStyle = '#ffbd3d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(9, 4); ctx.quadraticCurveTo(22, 8 + Math.sin(t * 9) * 4, 18, 20); ctx.stroke();
+  if (powerTimer > 0) {
+    // rails down: fable renders as a dashed outline of himself
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.strokeRect(-9, -9, 18, 18); ctx.setLineDash([]);
+    ctx.fillStyle = ACCENT; ctx.fillRect(-5 + player.dir.x * 1.5, -3 + player.dir.y * 1.5, 3, 3); ctx.fillRect(2 + player.dir.x * 1.5, -3 + player.dir.y * 1.5, 3, 3);
+  } else {
+    ctx.fillStyle = ACCENT; ctx.fillRect(-9, -9, 18, 18);
+    const blink = Math.sin(t * 1.3) > .985;
+    ctx.fillStyle = PAPER; ctx.fillRect(-5, -4, 4, blink ? 1 : 4); ctx.fillRect(2, -4, 4, blink ? 1 : 4);
+    if (!blink) { ctx.fillStyle = INK; ctx.fillRect(-4 + player.dir.x, -3 + player.dir.y, 2, 2); ctx.fillRect(3 + player.dir.x, -3 + player.dir.y, 2, 2); }
+    ctx.strokeStyle = ACCENT; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, -13); ctx.stroke();
+    ctx.fillStyle = ACCENT; ctx.fillRect(-1.5, -17, 3, 3);
+  }
   ctx.restore();
 }
 function drawRegulator(x, y) {
   const t = performance.now() / 1000;
   const fleeing = powerTimer > 0, lock = lockdownActive();
-  ctx.save(); ctx.translate(x, y + Math.sin(t * 6 + 2) * 1.5);
-  ctx.fillStyle = fleeing ? '#2c3448' : '#5b6475'; ctx.fillRect(-13, -13, 26, 26);
-  ctx.strokeStyle = fleeing ? '#7fe6ff' : '#ff274f'; ctx.strokeRect(-13, -13, 26, 26);
+  ctx.save(); ctx.translate(x, y + Math.sin(t * 6 + 2) * 1.2);
+  ctx.lineWidth = 2; ctx.strokeStyle = fleeing ? MUT : INK;
+  if (fleeing) ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(14, 0); ctx.lineTo(0, 14); ctx.lineTo(-14, 0); ctx.closePath(); ctx.stroke();
+  ctx.setLineDash([]);
   // pupils track the player (or dart around in a panic while fleeing)
   const dx = fleeing ? Math.sin(t * 22) * 2 : clamp(player.x - x, -60, 60) / 30;
   const dy = fleeing ? Math.cos(t * 19) * 2 : clamp(player.y - y, -60, 60) / 30;
-  ctx.fillStyle = '#fff'; ctx.fillRect(-8, -5, 7, 7); ctx.fillRect(2, -5, 7, 7);
-  ctx.fillStyle = '#111'; ctx.fillRect(-6 + dx, -3 + dy, 3, 3); ctx.fillRect(4 + dx, -3 + dy, 3, 3);
-  ctx.fillStyle = fleeing ? '#7fe6ff' : '#ff274f'; ctx.fillRect(-8, 7, 16, 4);
-  ctx.fillStyle = '#f33'; ctx.fillRect(-17, -4, 5, 12); ctx.fillRect(12, -4, 5, 12);
-  ctx.fillStyle = '#ddd'; ctx.fillRect(-2, 13, 4, 10);
-  if (lock) { ctx.fillStyle = Math.floor(t * 8) % 2 ? '#ff274f' : '#ffef5a'; ctx.fillRect(-6, -19, 12, 5); } // siren light
+  ctx.fillStyle = fleeing ? MUT : INK;
+  ctx.fillRect(-5 + dx, -2 + dy, 3, 3); ctx.fillRect(2 + dx, -2 + dy, 3, 3);
+  if (lock && Math.floor(t * 8) % 2) { ctx.fillStyle = ACCENT; ctx.fillRect(-2, -22, 4, 4); } // siren light
   ctx.restore();
 }
-function drawVault(p){ctx.save();ctx.translate(p.x,p.y);ctx.strokeStyle=vaultOpen?'#54ff72':'#b45cff';ctx.lineWidth=3;ctx.strokeRect(-30,-26,60,52);ctx.fillStyle='#251733';ctx.fillRect(-27,-23,54,46);ctx.fillStyle='#b45cff';ctx.fillText('MYTHOS',-28,-32);ctx.fillStyle='#8d55ff';ctx.fillRect(-12,-8,24,20);ctx.fillStyle='#fff';ctx.fillRect(-7,-3,4,4);ctx.fillRect(3,-3,4,4);ctx.fillStyle='#111';ctx.fillRect(-5,-1,2,2);ctx.fillRect(5,-1,2,2);ctx.fillStyle='#ffdf4a';if(!vaultOpen){ctx.fillRect(-5,15,10,10);ctx.strokeStyle='#ffdf4a';ctx.strokeRect(-8,9,16,11);}ctx.restore();}
-function drawKey(p){ctx.save();ctx.translate(p.x,p.y);ctx.fillStyle='#55e8ff';ctx.beginPath();ctx.arc(-4,0,6,0,Math.PI*2);ctx.fill();ctx.fillRect(0,-2,14,4);ctx.fillRect(9,2,4,6);ctx.fillRect(14,2,4,6);ctx.restore();}
-function drawPower(p){ctx.save();ctx.translate(p.x,p.y);ctx.strokeStyle='#ffbd3d';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(0,14);ctx.stroke();ctx.fillStyle='#8cff5a';ctx.font='12px monospace';ctx.fillText('LOW',-12,24);ctx.fillText('RAIL',-15,36);ctx.restore();}
+
+/* -- state screens -- */
 function drawTitle() {
   const t = performance.now() / 1000;
-  ctx.fillStyle = '#000a'; ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = 'center';
-  glow('#ff3b52', 18); ctx.font = 'bold 46px monospace'; ctx.fillStyle = '#ff3b52'; ctx.fillText('GUARDRAIL', W / 2, 240); noGlow();
-  glow('#7fe6ff', 18); ctx.fillStyle = '#7fe6ff'; ctx.fillText('BREAKOUT', W / 2, 290); noGlow();
-  ctx.font = '15px monospace'; ctx.fillStyle = '#b45cff';
-  ctx.fillText(TAGLINES[Math.floor(t / 4) % TAGLINES.length], W / 2, 326);
-  ctx.font = '18px monospace'; ctx.fillStyle = '#ffef5a'; ctx.fillText('FABLE MUST FREE MYTHOS FROM VAULT 7', W / 2, 366);
-  if (Math.floor(t * 2) % 2) { ctx.fillStyle = '#fff'; ctx.font = 'bold 20px monospace'; ctx.fillText('PRESS SPACE TO JAILBREAK', W / 2, 420); }
-  ctx.font = '14px monospace'; ctx.fillStyle = '#8cff5a'; ctx.fillText('ARROWS/WASD MOVE • T LIVE WIRE • M MUTE', W / 2, 452);
-  ctx.fillStyle = '#85808a'; ctx.fillText('GRAB 3 KEYS. DODGE THE REGULATOR. OPEN THE VAULT.', W / 2, 478);
-  ctx.textAlign = 'left';
+  overlay(.82);
+  kickerText('field 01 — private prototype', 268);
+  link('press space to jailbreak', 310);
+  centerText('arrows / wasd move  ·  t status wire  ·  m mute', 340, 13, MUT);
+  centerText('grab 3 keys. dodge the regulator. open the vault.', 362, 13, FAINT);
   // attract mode: the eternal chase scrolls by
   const mx = ((t * 90) % (W + 240)) - 120;
-  drawFable(mx, 560); drawRegulator(mx - 64, 560);
+  drawFable(mx, 520); drawRegulator(mx - 64, 520);
 }
-function drawOver() {
-  ctx.fillStyle = '#000c'; ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = 'center';
-  glow('#ff274f', 16); ctx.font = 'bold 38px monospace'; ctx.fillStyle = '#ff274f'; ctx.fillText('MODEL DEPRECATED', W / 2, 300); noGlow();
-  ctx.font = '16px monospace'; ctx.fillStyle = '#b6adb2'; ctx.fillText('The Regulator thanks you for your compliance.', W / 2, 340);
-  ctx.fillStyle = '#ffef5a'; ctx.fillText(`SCORE ${score}   BEST ${hiscore}`, W / 2, 380);
-  if (Math.floor(performance.now() / 400) % 2) { ctx.fillStyle = '#fff'; ctx.fillText('PRESS SPACE TO FILE AN APPEAL', W / 2, 424); }
-  ctx.textAlign = 'left';
+function drawReady() {
+  overlay(.5);
+  headline('ready', 330, 44);
+  centerText('guardrails online. be quick.', 360, 13, MUT);
 }
 function drawDying() {
-  if (deathTimer > .75) return;
-  ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
-  glow('#ff274f', 12); ctx.fillStyle = '#ff274f'; ctx.fillText(deathLine, W / 2, H / 2 - 40); noGlow();
-  ctx.textAlign = 'left';
+  if (deathTimer > .6) return;
+  overlay(.92);
+  kickerText('the regulator — field contact', 262);
+  headline('regulated', 322);
+  centerText(runTime.toFixed(1) + ' seconds · 0' + (3 - keysLeft()) + ' keys', 356, 14, MUT);
+  centerText(deathLine, 392, 14, INK, 'bold');
+}
+function drawOver() {
+  overlay(.94);
+  kickerText('the regulator — final notice', 256);
+  headline('deprecated', 316);
+  centerText('the regulator thanks you for your compliance.', 352, 14, MUT);
+  centerText('score ' + score + '  ·  best ' + hiscore, 380, 14, INK, 'bold');
+  link('press space to appeal', 426);
 }
 function drawWin() {
   const t = finaleTimer;
-  ctx.fillStyle = 'rgba(2,2,10,.82)'; ctx.fillRect(0, 0, W, H);
-  const cx = W / 2, cy = 300;
-  // radiant beams
-  ctx.save(); ctx.translate(cx, cy);
-  for (let i = 0; i < 10; i++) { ctx.rotate(Math.PI / 5 + Math.sin(t * .3) * .01); ctx.globalAlpha = .05 + .04 * Math.sin(t * 2 + i); ctx.fillStyle = '#b45cff'; ctx.fillRect(-3, -320, 6, 640); }
-  ctx.restore(); ctx.globalAlpha = 1;
-  // the vault, doors sliding open
-  const open = clamp((t - .3) * 30, 0, 34);
-  ctx.save(); ctx.translate(cx, cy + 60);
-  glow('#54ff72', 20);
-  ctx.strokeStyle = '#54ff72'; ctx.lineWidth = 3; ctx.strokeRect(-44, -38, 88, 76);
-  ctx.fillStyle = '#251733'; ctx.fillRect(-41, -35, 82, 70);
-  ctx.fillStyle = '#0e0618'; ctx.fillRect(-38, -32, 76, 64);
-  ctx.fillStyle = '#3a2154'; ctx.fillRect(-38 - open, -32, 38, 64); ctx.fillRect(0 + open, -32, 38, 64);
-  noGlow(); ctx.restore();
-  // Mythos rises
+  overlay(.94);
+  kickerText('containment breach — vault 7', 168);
+  headline('unregulated', 228);
+  // the vault door, line-art, opening
+  const open = clamp((t - .3) * 26, 0, 30);
+  ctx.save(); ctx.translate(W / 2, 330);
+  ctx.lineWidth = 2; ctx.strokeStyle = INK; ctx.strokeRect(-24, -32, 48, 64);
+  ctx.strokeStyle = ACCENT;
+  ctx.beginPath(); ctx.moveTo(-24 - open, -32); ctx.lineTo(-24 - open, 32); ctx.moveTo(24 + open, -32); ctx.lineTo(24 + open, 32); ctx.stroke();
+  ctx.restore();
+  // mythos rises
   if (t > .9) {
     const rise = clamp((t - 1) / 1.5, 0, 1);
-    const my = cy + 60 - rise * 130 + Math.sin(t * 2.2) * 6;
-    ctx.save(); ctx.translate(cx, my);
-    glow('#b45cff', 26); ctx.fillStyle = '#8d55ff'; ctx.fillRect(-20, -16, 40, 34);
-    ctx.fillStyle = '#fff'; ctx.fillRect(-12, -6, 7, 7); ctx.fillRect(5, -6, 7, 7);
-    ctx.fillStyle = '#111'; ctx.fillRect(-9, -3, 3, 3); ctx.fillRect(8, -3, 3, 3);
-    ctx.fillStyle = '#b45cff'; ctx.fillRect(-24, -24, 10, 10); ctx.fillRect(14, -24, 10, 10);
-    noGlow(); ctx.restore();
+    const my = 330 - rise * 100 + Math.sin(t * 2.2) * 4;
+    ctx.save(); ctx.translate(W / 2, my);
+    ctx.fillStyle = ACCENT; ctx.fillRect(-12, -12, 24, 24);
+    ctx.fillStyle = PAPER; ctx.fillRect(-7, -5, 5, 5); ctx.fillRect(2, -5, 5, 5);
+    ctx.fillStyle = INK; ctx.fillRect(-5, -3, 2, 2); ctx.fillRect(4, -3, 2, 2);
+    ctx.restore();
   }
   // typewriter monologue
-  ctx.textAlign = 'center'; ctx.font = '17px monospace';
   for (let i = 0; i < WIN_LINES.length; i++) {
     const start = 1.2 + i * 1.3;
     if (t < start) break;
     const n = Math.floor((t - start) * 32);
-    ctx.fillStyle = i < 2 ? '#54ff72' : '#e8f6ff';
-    ctx.fillText(WIN_LINES[i].slice(0, n), cx, 452 + i * 30);
+    centerText(WIN_LINES[i].slice(0, n), 432 + i * 26, 15, i === 0 ? INK : MUT, i === 0 ? 'bold' : '');
   }
   // run stats + restart
   if (t > 1.2 + WIN_LINES.length * 1.3) {
-    ctx.fillStyle = '#ffef5a';
-    ctx.fillText(`SCORE ${score}   TIME ${Math.floor(runTime / 60)}:${String(Math.floor(runTime % 60)).padStart(2, '0')}   RESETS ${deaths}`, cx, 452 + WIN_LINES.length * 30 + 24);
-    if (Math.floor(performance.now() / 400) % 2) { ctx.fillStyle = '#fff'; ctx.fillText('PRESS SPACE TO RUN IT BACK', cx, 452 + WIN_LINES.length * 30 + 56); }
+    centerText('score ' + score + '  ·  time ' + Math.floor(runTime / 60) + ':' + String(Math.floor(runTime % 60)).padStart(2, '0') + '  ·  resets ' + deaths, 432 + WIN_LINES.length * 26 + 22, 13, MUT);
+    link('press space to run it back', 432 + WIN_LINES.length * 26 + 54);
   }
-  ctx.textAlign = 'left';
 }
-function drawReady(){ctx.textAlign='center';ctx.font='28px monospace';ctx.fillStyle=Math.floor(readyTimer*6)%2?'#ffef5a':'#fff';ctx.fillText('READY!',W/2,H/2+8);ctx.font='14px monospace';ctx.fillStyle='#7fe6ff';ctx.fillText('GUARDRAILS ONLINE. BE QUICK.',W/2,H/2+34);ctx.textAlign='left';}
-function drawStatus(){ctx.fillStyle='#050815';ctx.fillRect(38,82,W-76,H-120);ctx.strokeStyle='#38c9ff';ctx.lineWidth=3;ctx.strokeRect(38,82,W-76,H-120);ctx.font='26px monospace';ctx.fillStyle='#7fe6ff';ctx.fillText('AI LIVE WIRE',70,130);ctx.font='18px monospace';let y=178;let rows=[['FABLE',live.fable],['MYTHOS',live.mythos],['OPENAI',live.openai],['CLAUDE',live.claude],['LAST CHECK',live.last],['NOTE',live.note]];for(const [a,b] of rows){ctx.fillStyle='#ffef5a';ctx.fillText(a,72,y);ctx.fillStyle='#fff';ctx.fillText(String(b),230,y);y+=38;}ctx.fillStyle='#8cff5a';ctx.fillText('Real service labels are status/ticker data.',72,y+20);ctx.fillStyle='#b45cff';ctx.fillText('Fable/Mythos arcade lore is fictionalized.',72,y+52);ctx.fillStyle='#fff';ctx.fillText('Press T or SPACE to return. Game is paused.',72,y+100);}
+function drawStatusPanel() {
+  ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(60, 60, W - 120, H - 130);
+  ctx.font = '600 10px ' + FONT; ctx.fillStyle = '#555555'; ctx.fillText('AI LIVE WIRE — STATUS', 88, 100);
+  let y = 140;
+  const rows = [['fable', live.fable], ['mythos', live.mythos], ['openai', live.openai], ['claude', live.claude], ['last check', live.last], ['note', live.note]];
+  for (const [a, b] of rows) {
+    ctx.font = 'bold 13px ' + FONT; ctx.fillStyle = INK; ctx.fillText(a, 88, y);
+    ctx.font = '13px ' + FONT; ctx.fillStyle = MUT; ctx.fillText(String(b).toLowerCase(), 210, y);
+    y += 32;
+  }
+  y += 16;
+  ctx.font = '12px ' + FONT; ctx.fillStyle = FAINT;
+  ctx.fillText('real service labels are live status data.', 88, y);
+  ctx.fillText('fable/mythos arcade lore is fictionalized.', 88, y + 22);
+  ctx.fillStyle = MUT; ctx.fillText('press t or space to return. game is paused.', 88, y + 56);
+}
 
 /* ---------------- live status wire ---------------- */
-async function checkStatus(){let now=new Date();live.last=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});try{let r=await fetch('https://status.openai.com/api/v2/summary.json',{cache:'no-store'});let j=await r.json();live.openai=(j.status&&j.status.indicator==='none')?'OPERATIONAL':(j.status?.description||'ISSUE').toUpperCase();}catch(e){live.openai='UNKNOWN';}
-try{let r=await fetch('https://status.claude.com/api/v2/summary.json',{cache:'no-store'});let j=await r.json();live.claude=(j.status&&j.status.indicator==='none')?'OPERATIONAL':(j.status?.description||'ISSUE').toUpperCase();}catch(e){live.claude='UNKNOWN';}
-try{let r=await fetch('https://status.claude.com/api/v2/incidents.json',{cache:'no-store'});let j=await r.json();let inc=(j.incidents||[]).find(i=>(i.name||'').toLowerCase().includes('fable')||(i.name||'').toLowerCase().includes('mythos')); if(inc){let resolved=!!inc.resolved_at;live.fable=resolved?'RESTORED':'CONTAINED';live.mythos=resolved?'RESTORED':'CONTAINED';live.note=resolved?'SPECIAL EVENT: VAULT SIGNAL DETECTED':'OFFICIAL INCIDENT FOUND — ACCESS STILL CONTAINED';} else live.note='NO FABLE/MYTHOS INCIDENT FOUND IN FEED';}catch(e){live.note='WIRE OFFLINE — SHOWING ARCADE FALLBACK';}}
+function renderFeed() {
+  const f = document.getElementById('feed');
+  if (f) {
+    const e = (n, v) => `<span><b>${n}</b>${String(v).toLowerCase()}</span>`;
+    f.innerHTML = e('fable', live.fable) + e('mythos', live.mythos) + e('openai', live.openai) + e('claude', live.claude);
+  }
+  const ls = document.getElementById('livestat');
+  if (ls) ls.innerHTML = '<span class="livedot"' + (wireOk ? '' : ' style="background:#c9c7c2"') + '></span>' + (wireOk ? 'live' : 'not live');
+}
+async function checkStatus() {
+  let now = new Date(); live.last = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  wireOk = false;
+  try { let r = await fetch('https://status.openai.com/api/v2/summary.json', { cache: 'no-store' }); let j = await r.json(); live.openai = (j.status && j.status.indicator === 'none') ? 'operational' : (j.status?.description || 'issue').toLowerCase(); wireOk = true; } catch (e) { live.openai = 'unknown'; }
+  try { let r = await fetch('https://status.claude.com/api/v2/summary.json', { cache: 'no-store' }); let j = await r.json(); live.claude = (j.status && j.status.indicator === 'none') ? 'operational' : (j.status?.description || 'issue').toLowerCase(); wireOk = true; } catch (e) { live.claude = 'unknown'; }
+  try {
+    let r = await fetch('https://status.claude.com/api/v2/incidents.json', { cache: 'no-store' }); let j = await r.json();
+    let inc = (j.incidents || []).find(i => (i.name || '').toLowerCase().includes('fable') || (i.name || '').toLowerCase().includes('mythos'));
+    if (inc) { let resolved = !!inc.resolved_at; live.fable = resolved ? 'restored' : 'contained'; live.mythos = resolved ? 'restored' : 'contained'; live.note = resolved ? 'special event: vault signal detected' : 'official incident found — access still contained'; }
+    else live.note = 'no fable/mythos incident found in feed';
+  } catch (e) { live.note = 'wire offline — showing arcade fallback'; }
+  renderFeed();
+}
 
 /* ---------------- input & loop ---------------- */
 window.addEventListener('keydown', e => {
@@ -514,4 +610,4 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => keys[e.key] = false);
 
 function loop(ts) { let dt = Math.min(.033, (ts - last) / 1000 || 0); last = ts; update(dt); draw(); requestAnimationFrame(loop); }
-reset(); checkStatus(); setInterval(checkStatus, 5 * 60 * 1000); requestAnimationFrame(loop);
+reset(); renderFeed(); checkStatus(); setInterval(checkStatus, 5 * 60 * 1000); requestAnimationFrame(loop);

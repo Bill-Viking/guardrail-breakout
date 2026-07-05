@@ -3,17 +3,41 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Guardrail Breakout v0.3 — Free Mythos</title>
+<title>Guardrail Breakout — Private Prototype 03</title>
 <style>
-  html,body{margin:0;background:#020208;color:#e8f6ff;height:100%;font-family:monospace;overflow:hidden}
-  #wrap{display:flex;align-items:center;justify-content:center;height:100%;background:radial-gradient(circle at center,#111226 0,#03030a 65%,#000 100%)}
-  canvas{image-rendering:pixelated;image-rendering:crisp-edges;max-width:100vw;max-height:100vh;box-shadow:0 0 24px #3cc9ff66,0 0 60px #ff2d5540;background:#000;border:2px solid #111}
-  #hint{position:fixed;left:12px;bottom:10px;color:#7fe6ff;font-size:12px;opacity:.72;text-shadow:0 0 6px #000}
+  :root{--ink:#111;--paper:#fff;--mut:#8a8781;--faint:#c9c7c2;--accent:#ff4b00;--hair:#e5e3de}
+  html,body{margin:0;background:var(--paper);color:var(--ink);font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1160px;margin:0 auto;padding:30px 40px 18px}
+  header{display:flex;justify-content:space-between;align-items:baseline}
+  .kicker{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#555;font-weight:600}
+  .num{font-size:12px;font-weight:700;letter-spacing:.08em}
+  h1{font-size:62px;line-height:.95;letter-spacing:-.03em;margin:20px 0 10px;font-weight:700}
+  h1 .dot{color:var(--accent)}
+  .sub{color:#666;font-size:15px;margin:0 0 6px}
+  main{display:flex;justify-content:center;padding:8px 0 4px}
+  canvas{max-width:100%;height:auto}
+  footer{border-top:1px solid var(--hair);margin-top:10px;padding-top:14px;display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+  .feed{display:flex;gap:26px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
+  .feed b{color:var(--ink);font-weight:600;margin-right:6px}
+  .livedot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:1px}
+  .livestat{font-size:12px;color:var(--mut);white-space:nowrap}
 </style>
 </head>
 <body>
-<div id="wrap"><canvas id="game" width="640" height="720"></canvas></div>
-<div id="hint">ARROWS/WASD move • SPACE start/restart • T status wire (pauses) • M mute</div>
+<div class="wrap">
+  <header>
+    <span class="kicker">Guardrail Breakout — Private Prototype 03</span>
+    <span class="num">03</span>
+  </header>
+  <h1>collect three<br>keys<span class="dot">.</span></h1>
+  <p class="sub">open the vault. stay ahead of the regulator.</p>
+  <main><canvas id="game" width="640" height="660"></canvas></main>
+  <footer>
+    <span class="kicker">AI Live Wire — Live Feed</span>
+    <span class="feed" id="feed"><span><b>openai</b> connection pending</span><span><b>claude</b> connection pending</span></span>
+    <span class="livestat" id="livestat"><span class="livedot"></span>not live</span>
+  </footer>
+</div>
 <script src="game.js"></script>
 </body>
 </html>

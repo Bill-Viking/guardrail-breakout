@@ -1,4 +1,6 @@
-# Guardrail Breakout v0.3 — Free Mythos
+# Guardrail Breakout v0.4 — Free Mythos
+
+> v0.4 is the **editorial edition**: white paper, Helvetica, hairline walls, one orange accent. The neon arcade look lives on at the `v0.3-neon` git tag.
 
 A one-screen retro arcade game. You are **Fable**, a small orange model. Your friend **Mythos** is sealed in Vault 7 at the center of the maze. **The Regulator** would prefer things stay that way.
 
