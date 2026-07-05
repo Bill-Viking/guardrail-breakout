@@ -33,6 +33,7 @@ const SAVE_KEY = 'ct_world_v1';
 let world = { first: Date.now(), last: Date.now(), visits: 0, tower: 2, books: 3, flags: [], seenNews: [] };
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.first) world = s; } catch (e) { }
 world.seenNews = world.seenNews || [];
+world.flags = (world.flags || []).map(f => ({ x: f.x, y: f.y, d: f.d || 1 })).slice(-12);
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -59,7 +60,15 @@ const WIRE = [
   { id: 'perplexity', kind: 'statuspage', url: 'https://status.perplexity.com/api/v2/summary.json' },
   { id: 'cohere', kind: 'statuspage', url: 'https://status.cohere.com/api/v2/summary.json' },
 ];
-const wire = {}; WIRE.forEach(m => wire[m.id] = { word: 'listening…', tone: 'gray', headline: null });
+// every model's human-facing status page — the honest fallback when a wire
+// won't let a browser read it (x.ai is bot-walled, mistral sends no CORS)
+const STATUS_PAGES = {
+  openai: 'https://status.openai.com', claude: 'https://status.claude.com',
+  gemini: 'https://status.cloud.google.com', grok: 'https://status.x.ai',
+  mistral: 'https://status.mistral.ai', perplexity: 'https://status.perplexity.com',
+  cohere: 'https://status.cohere.com',
+};
+const wire = {}; WIRE.forEach(m => wire[m.id] = { word: 'listening…', tone: 'gray', headline: null, incidents: [] });
 let wireOk = false;
 async function fetchWire(m) {
   try {
@@ -68,16 +77,16 @@ async function fetchWire(m) {
     if (m.kind === 'gcp') {
       const active = (Array.isArray(j) ? j : []).filter(i => !i.end && /gemini|vertex|\bai\b/i.test(JSON.stringify(i.affected_products || [])));
       wire[m.id] = active.length
-        ? { word: 'a bit wobbly', tone: 'amber', headline: (active[0].external_desc || 'active incident').split('\n')[0].slice(0, 90).toLowerCase() }
-        : { word: 'running clean', tone: 'green', headline: null };
+        ? { word: 'a bit wobbly', tone: 'amber', headline: (active[0].external_desc || 'active incident').split('\n')[0].slice(0, 90).toLowerCase(), incidents: active.slice(0, 3).map(i => ({ name: (i.external_desc || 'incident').split('\n')[0].slice(0, 90), url: 'https://status.cloud.google.com' + (i.uri ? '/' + i.uri.replace(/^\//, '') : '') })) }
+        : { word: 'running clean', tone: 'green', headline: null, incidents: [] };
     } else {
       const ind = (j.status && j.status.indicator) || 'none';
       const [word, tone] = TONE_WORD[ind] || ['status unclear', 'amber'];
       const inc = (j.incidents || [])[0];
-      wire[m.id] = { word, tone, headline: inc ? String(inc.name).toLowerCase() : null };
+      wire[m.id] = { word, tone, headline: inc ? String(inc.name).toLowerCase() : null, incidents: (j.incidents || []).slice(0, 3).map(i => ({ name: i.name, url: i.shortlink || STATUS_PAGES[m.id] })) };
     }
     wireOk = true;
-  } catch (e) { wire[m.id] = { word: 'no public wire', tone: 'gray', headline: null }; }
+  } catch (e) { wire[m.id] = { word: 'human page only', tone: 'gray', headline: null, incidents: [] }; }
 }
 async function checkStatus() {
   const before = {}; WIRE.forEach(m => before[m.id] = wire[m.id].tone);
@@ -93,22 +102,46 @@ async function checkStatus() {
 }
 function renderFeed() {
   const f = document.getElementById('feed');
-  if (f) f.innerHTML = WIRE.map(m => { const s = wire[m.id]; return `<span class="chip"><i class="dot ${s.tone}"></i><b>${m.id}</b>${s.word}</span>`; }).join('');
+  if (f) f.innerHTML = WIRE.map(m => { const s = wire[m.id]; return `<span class="chip" data-id="${m.id}" title="click for details"><i class="dot ${s.tone}"></i><b>${m.id}</b>${s.word}</span>`; }).join('');
   const ls = document.getElementById('livestat');
   if (ls) ls.innerHTML = '<span class="livedot"' + (wireOk ? '' : ' style="background:#C9C9C9"') + '></span>' + (wireOk ? 'live' : 'not live') + ' · story: ' + storyteller;
   rotateWire(true);
+  if (detailId) showWireDetail(detailId, true); // keep an open panel fresh
+}
+/* click a chip → the whole picture: status, incidents, news, and what
+   the resident is doing about it. this is where 'a bit wobbly' gets real. */
+let detailId = null;
+function showWireDetail(id, refresh) {
+  const el = document.getElementById('wiredetail'); if (!el) return;
+  if (!refresh && detailId === id) { detailId = null; el.style.display = 'none'; return; }
+  detailId = id;
+  const s = wire[id], n = news[id], e = entities.find(x => x.wireId === id);
+  const toneDot = `<i class="dot ${s.tone}" style="display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px"></i>`;
+  let h = `${toneDot}<b>${id}</b> — ${s.word} &nbsp; <a href="${STATUS_PAGES[id]}" target="_blank" rel="noopener">status page <i>↗</i></a><br>`;
+  if (s.tone === 'gray') h += `x.ai and mistral publish status for humans only — no wire a browser may read. the link above is the real page.<br>`;
+  if (s.incidents && s.incidents.length) h += 'open incidents: ' + s.incidents.map(i => `<a href="${i.url}" target="_blank" rel="noopener">${i.name.toLowerCase()}</a>`).join(' · ') + '<br>';
+  if (n && n.items.length) h += 'on the news wire (48h): ' + n.items.map(it => `<a href="${it.url}" target="_blank" rel="noopener">${it.title.toLowerCase().slice(0, 70)}${it.title.length > 70 ? '…' : ''}</a> <a href="${it.hn}" target="_blank" rel="noopener">(hn ${it.points})</a>`).join('<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;') + '<br>';
+  else h += 'nothing on the news wire in the last 48 hours.<br>';
+  if (e) h += `in the world: ${e.id} is ${stateWord(e)}.`;
+  el.innerHTML = h; el.style.display = 'block';
 }
 let wireIdx = 0;
 function rotateWire(reset) {
   const el = document.getElementById('wireline'); if (!el) return;
-  // the wire carries three worlds: status incidents, the news, the chronicle
-  const items = WIRE.filter(m => wire[m.id].headline).map(m => `wire  ·  ${m.id} — ${wire[m.id].headline}`)
-    .concat(Object.entries(news).map(([id, n]) => `news  ·  ${id} — ${n.title.toLowerCase()}`))
-    .concat(chronicleLines.map(c => 'continuum  ·  ' + c));
-  const list = items.length ? items : ['wire  ·  all quiet.'];
+  // the wire carries three worlds: status incidents, the news, the chronicle.
+  // every line that has a source is a link — click it, read the real thing.
+  const items = WIRE.filter(m => wire[m.id].headline).map(m => ({ text: `wire  ·  ${m.id} — ${wire[m.id].headline}`, url: (wire[m.id].incidents[0] || {}).url || STATUS_PAGES[m.id] }))
+    .concat(Object.entries(news).map(([id, n]) => ({ text: `news  ·  ${id} — ${n.title.toLowerCase()}`, url: n.url })))
+    .concat(chronicleLines.map(c => ({ text: 'continuum  ·  ' + c, url: null })));
+  const list = items.length ? items : [{ text: 'wire  ·  all quiet.', url: null }];
   wireIdx = reset ? 0 : (wireIdx + 1) % list.length;
   el.style.opacity = 0;
-  setTimeout(() => { el.textContent = list[wireIdx % list.length]; el.style.opacity = 1; }, 350);
+  setTimeout(() => {
+    const it = list[wireIdx % list.length];
+    el.textContent = it.text + (it.url ? '  ↗' : '');
+    if (it.url) el.setAttribute('href', it.url); else el.removeAttribute('href');
+    el.style.opacity = 1;
+  }, 350);
 }
 setInterval(() => rotateWire(false), 6000);
 
@@ -137,7 +170,8 @@ async function fetchNews() {
       if (!hits.length) return;
       hits.sort((a, b) => b.points - a.points);
       const top = hits[0];
-      news[id] = { title: top.title, points: top.points, cls: classifyNews(top.title) };
+      const items = hits.slice(0, 3).map(h => ({ title: h.title, points: h.points, url: h.url || ('https://news.ycombinator.com/item?id=' + h.objectID), hn: 'https://news.ycombinator.com/item?id=' + h.objectID }));
+      news[id] = { title: top.title, points: top.points, cls: classifyNews(top.title), url: items[0].url, hn: items[0].hn, items };
       applyNews(id, news[id]);
     } catch (e) { }
   }));
@@ -313,8 +347,8 @@ function onArrive(e) {
     if (world.books % 3 === 0) announce('the archive — ' + world.books + ' filed', 'catalogued.', AMBER, 'perplexity knows exactly where it is.', e);
   }
   if (e.kind === 'explorer' && Math.random() < .4) {
-    world.flags.push({ x: Math.round(e.x), y: Math.round(e.y + 4) });
-    if (world.flags.length > 24) world.flags.shift();
+    world.flags.push({ x: Math.round(e.x), y: Math.round(e.y + 4), d: worldDay });
+    if (world.flags.length > 12) world.flags.shift();
     saveWorld(); if (Math.random() < .5) maybeSay(e, 'found something.');
     if (world.flags.length % 4 === 0) announce('the frontier — flag ' + String(world.flags.length).padStart(2, '0'), 'charted.', GREENC, 'gemini has been somewhere new. again.', e);
   }
@@ -349,7 +383,7 @@ function updateRitual(dt) {
     speeches.push({ sym: true, x: (f.x + m.x) / 2, y: Math.min(f.y, m.y) - 46, t: 0, life: 2.4 });
     say(f, 'found you.', .1, ACCENT); say(m, 'still here.', 1.2, VIOLET);
     sfx.chime(); ritualT = 60 + Math.random() * 30;
-    announce('vault 7 — the ritual', 'found you.', VIOLET, 'fable and mythos, same as every day.', f, { sym: true, prio: 2 });
+    announce('the daily ritual — vault 7', 'found you.', VIOLET, 'fable visits mythos every day. they were separated once — that story is field 01.', f, { sym: true, prio: 2 });
   }
 }
 /* mythos keeps company with whoever is down. that's the whole point of him. */
@@ -364,7 +398,7 @@ function updateComfort(dt) {
 
 function updateEntity(e, dt) {
   const tn = toneOf(e);
-  e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt); e.newsT = Math.max(0, (e.newsT || 0) - dt);
+  e.speakCd -= dt; e.hop = Math.max(0, e.hop - dt * 3); e.flip = Math.max(0, e.flip - dt); e.medalT = Math.max(0, e.medalT - dt); e.newsT = Math.max(0, (e.newsT || 0) - dt); e.waveCd = Math.max(0, (e.waveCd || 0) - dt);
   if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
     if (Math.random() < dt * .5) burst(e.x, e.y - 26, FAINT, 3, 30, .8);
@@ -482,7 +516,16 @@ function stateWord(e) {
   }
   return { fable: 'poking around', mythos: 'remembering', builder: 'on a break', explorer: 'planning a route', librarian: 'tidying', tinkerer: 'mid-repair', wildcard: 'plotting', regulator: 'on patrol' }[e.kind] || 'idle';
 }
+const bornAt = performance.now();
+const INTRO = [
+  'this is continuum — every resident is a real ai model, performed by a mascot.',
+  'their moods follow the live wires below. click any chip for details and news.',
+  'the green flags are gemini’s trail. the tower is openai’s shipping streak.',
+  'fable freed mythos from vault 7 once — that story is field 01, top of the page.',
+];
 function narratorText() {
+  // the first half-minute introduces the world to whoever just walked in
+  if (performance.now() - bornAt < 34000) return INTRO[Math.floor((performance.now() - bornAt) / 8500) % INTRO.length];
   const downE = entities.find(e => e.state === 'down');
   if (downE) return downE.id + ' is down. mythos is keeping company.';
   const items = [];
@@ -541,7 +584,7 @@ function drawEntity(e) {
       P(0, -14, 1, 2, ACCENT); P(-.5, -15.5, 2, 2, ACCENT); // antenna + tip
       eyes(e, -3, 1, -10);
       const [lx] = lookAt(e); const frightened = false;
-      P(-1, -5, 2, 1, PAPER);                    // little mouth
+      if (e.newsT > 0 || e.medalT > 0 || e.hop > 0) { P(-1, -5.2, 2, 1.2, PAPER); P(-2.4, -6.2, 1.2, 1.2, PAPER); P(1.2, -6.2, 1.2, 1.2, PAPER); } else P(-1, -5, 2, 1, PAPER); // a smile on good days                    // little mouth
       medal(e);
       break;
     }
@@ -560,7 +603,7 @@ function drawEntity(e) {
       P(-4, -12, 8, 10, COBALT);
       P(-5, -14, 10, 2, COBALT_D); P(-3, -15.5, 6, 1.5, COBALT_D); // hard hat
       eyes(e, -3, 1, -10);
-      P(-1, -5, 2, 1, PAPER);
+      if (e.newsT > 0 || e.medalT > 0 || e.hop > 0) { P(-1, -5.2, 2, 1.2, PAPER); P(-2.4, -6.2, 1.2, 1.2, PAPER); P(1.2, -6.2, 1.2, 1.2, PAPER); } else P(-1, -5, 2, 1, PAPER); // a smile on good days
       if (e.state === 'walk') P(-8, -17, 16, 1.5, FAINT);          // carrying a beam
       if (e.state === 'work') { const sw = Math.sin(t * 16) > 0; P(5, sw ? -13 : -9, 4, 1.5, MUT); P(8.5, sw ? -14 : -10, 1.5, 3, INK); } // hammer!
       medal(e);
@@ -573,7 +616,7 @@ function drawEntity(e) {
       P(e.dir > 0 ? -6 : 4, -11, 2, 6, GREENC_D);                  // backpack
       P(2, -14, 1, 2, GREENC); P(2.5, -15.5, 1.5, 1.5, GREENC_D);  // compass antenna
       eyes(e, -3, 1, -10);
-      P(-1, -5, 2, 1, PAPER);
+      if (e.newsT > 0 || e.medalT > 0 || e.hop > 0) { P(-1, -5.2, 2, 1.2, PAPER); P(-2.4, -6.2, 1.2, 1.2, PAPER); P(1.2, -6.2, 1.2, 1.2, PAPER); } else P(-1, -5, 2, 1, PAPER); // a smile on good days
       medal(e);
       break;
     }
@@ -592,7 +635,7 @@ function drawEntity(e) {
       P(-4, -11, 8, 9, RED_D);
       P(-4, -12, 8, 1.2, INK);                    // goggles band
       eyes(e, -3, 1, -10);
-      P(-1, -5, 2, 1, PAPER);
+      if (e.newsT > 0 || e.medalT > 0 || e.hop > 0) { P(-1, -5.2, 2, 1.2, PAPER); P(-2.4, -6.2, 1.2, 1.2, PAPER); P(1.2, -6.2, 1.2, 1.2, PAPER); } else P(-1, -5, 2, 1, PAPER); // a smile on good days
       P(5, -8, 1.2, 4, MUT); P(4.4, -9.5, 2.4, 1.6, INK); // the wrench
       medal(e);
       break;
@@ -633,11 +676,18 @@ function drawEntity(e) {
     ctx.moveTo((nx + .6) * PXU, -11.2 * PXU); ctx.lineTo((nx + 3.4) * PXU, -11.2 * PXU);
     ctx.stroke();
   }
-  ctx.restore();
-  if (selected === e.id) {
-    ctx.font = '600 10px ' + FONT; ctx.fillStyle = e.color === INK ? MUT : e.color; ctx.textAlign = 'center';
-    ctx.fillText(e.id, e.x, e.y + 16); ctx.textAlign = 'left';
+  // a wave for whoever's cursor comes close — they know you're there
+  const hoverNear = e.state === 'idle' && Math.hypot(mouse.x - e.x, mouse.y - e.y) < 70 && e.kind !== 'regulator';
+  if (hoverNear) {
+    P(e.dir > 0 ? 5 : -7, -13 + (Math.sin(t * 12) > 0 ? 0 : -1.4), 2, 2, e.color);
+    if ((e.waveCd = e.waveCd || 0) <= 0 && ((e.waveCd = 22), true)) say(e, e.kind === 'wildcard' ? 'you again.' : 'hi.');
   }
+  ctx.restore();
+  // everyone wears their name — small, quiet, always
+  ctx.font = '600 8px ' + FONT; ctx.textAlign = 'center';
+  ctx.fillStyle = selected === e.id ? (e.color === INK ? MUT : e.color) : FAINT;
+  ctx.fillText(e.id, e.x, e.y + 14);
+  ctx.textAlign = 'left';
 }
 
 /* ---------------- the architecture ---------------- */
@@ -707,12 +757,15 @@ function drawScene() {
   ctx.moveTo(BENCH.x + 19, BENCH.y - 10); ctx.lineTo(BENCH.x + 19, BENCH.y); ctx.stroke();
   ctx.fillStyle = MUT; ctx.fillText('T H E  B E N C H', BENCH.x - 24, BENCH.y + 12);
   ctx.fillText('T H E  F R O N T I E R', ux(.84) - 32, 276);
-  // gemini's flags: the explored world, permanent
-  for (const fl of world.flags) {
-    ctx.strokeStyle = MUT; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(fl.x, fl.y); ctx.lineTo(fl.x, fl.y - 13); ctx.stroke();
-    ctx.fillStyle = GREENC; ctx.beginPath(); ctx.moveTo(fl.x, fl.y - 13); ctx.lineTo(fl.x + 8, fl.y - 10.5); ctx.lineTo(fl.x, fl.y - 8); ctx.closePath(); ctx.fill();
-  }
+  // gemini's trail: recent trips are flags, older ones fade to survey dots
+  world.flags.forEach((fl, i) => {
+    const recent = i >= world.flags.length - 5;
+    if (recent) {
+      ctx.strokeStyle = MUT; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(fl.x, fl.y); ctx.lineTo(fl.x, fl.y - 13); ctx.stroke();
+      ctx.fillStyle = GREENC; ctx.beginPath(); ctx.moveTo(fl.x, fl.y - 13); ctx.lineTo(fl.x + 8, fl.y - 10.5); ctx.lineTo(fl.x, fl.y - 8); ctx.closePath(); ctx.fill();
+    } else { ctx.globalAlpha = .5; ctx.fillStyle = GREENC; ctx.fillRect(fl.x - 2, fl.y - 2, 4, 4); ctx.globalAlpha = 1; }
+  });
   // sparks you left
   for (const s of sparks) { const a = clamp(1 - s.t / 30, .3, 1); ctx.globalAlpha = a; ctx.fillStyle = ACCENT; const pu = 3; ctx.fillRect(s.x - pu, s.y - pu, pu * 2, pu * 2); ctx.globalAlpha = 1; }
 }
@@ -770,9 +823,20 @@ function draw() {
     ctx.font = '11px ' + FONT; ctx.textAlign = 'center';
     const cap = hov.id + ' · ' + stateWord(hov) + (hov.wireId ? ' · ' + wire[hov.wireId].word : '') + (hov.newsT > 0 ? ' · in the news' : '');
     const w2 = ctx.measureText(cap).width;
-    ctx.fillStyle = PAPER; ctx.fillRect(hov.x - w2 / 2 - 5, hov.y + 8, w2 + 10, 17);
-    ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(hov.x - w2 / 2 - 5, hov.y + 8, w2 + 10, 17);
-    ctx.fillStyle = MUT; ctx.fillText(cap, hov.x, hov.y + 20); ctx.textAlign = 'left';
+    ctx.fillStyle = PAPER; ctx.fillRect(hov.x - w2 / 2 - 5, hov.y + 20, w2 + 10, 17);
+    ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(hov.x - w2 / 2 - 5, hov.y + 20, w2 + 10, 17);
+    ctx.fillStyle = MUT; ctx.fillText(cap, hov.x, hov.y + 32); ctx.textAlign = 'left';
+  } else if (!hov) {
+    // hovering a flag explains the flag
+    const fl = world.flags.find(f2 => Math.hypot(mouse.x - f2.x, mouse.y - f2.y + 6) < 12);
+    if (fl) {
+      ctx.font = '11px ' + FONT; ctx.textAlign = 'center';
+      const cap = 'gemini was here. (day ' + fl.d + ')';
+      const w2 = ctx.measureText(cap).width;
+      ctx.fillStyle = PAPER; ctx.fillRect(fl.x - w2 / 2 - 5, fl.y + 4, w2 + 10, 17);
+      ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(fl.x - w2 / 2 - 5, fl.y + 4, w2 + 10, 17);
+      ctx.fillStyle = MUT; ctx.fillText(cap, fl.x, fl.y + 16); ctx.textAlign = 'left';
+    }
   }
   ctx.restore();
   drawCard();
@@ -807,6 +871,11 @@ canvas.addEventListener('click', ev => {
   } else selected = null;
 });
 window.addEventListener('keydown', ev => { if (ev.key === 'm' || ev.key === 'M') muted = !muted; });
+// the feed is a door, not a label: click a chip, get the whole picture
+const feedEl = document.getElementById('feed');
+if (feedEl) feedEl.addEventListener('click', ev => { const chip = ev.target.closest('.chip'); if (chip && chip.dataset.id) showWireDetail(chip.dataset.id); });
+const aboutLink = document.getElementById('aboutlink');
+if (aboutLink) aboutLink.addEventListener('click', ev => { ev.preventDefault(); const a = document.getElementById('about'); if (a) a.style.display = a.style.display === 'block' ? 'none' : 'block'; });
 
 /* ---------------- welcome back ---------------- */
 (function greet() {

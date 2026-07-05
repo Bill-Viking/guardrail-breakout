@@ -28,7 +28,15 @@
   .dot.green{background:var(--green)} .dot.amber{background:var(--amber)} .dot.red{background:var(--red)} .dot.gray{background:var(--faint)}
   .livedot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:1px}
   .livestat{font-size:12px;color:var(--mut);white-space:nowrap}
-  #wireline{margin-top:12px;font-size:13px;color:var(--mut);min-height:18px;transition:opacity .35s ease}
+  #wireline{display:block;margin-top:12px;font-size:13px;color:var(--mut);min-height:18px;transition:opacity .35s ease;text-decoration:none;cursor:pointer}
+  #wireline:hover{color:var(--ink)}
+  .chip{cursor:pointer} .chip:hover b{color:var(--accent)}
+  #wiredetail{display:none;margin-top:14px;border:1px solid var(--hair);padding:14px 18px;font-size:13px;color:var(--mut);max-width:680px;line-height:1.7}
+  #wiredetail b{color:var(--ink)} #wiredetail a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--hair)}
+  #wiredetail a i{color:var(--accent);font-style:normal}
+  #about{display:none;border:1px solid var(--hair);padding:16px 20px;margin:12px 0 4px;font-size:13px;color:var(--mut);line-height:1.75;max-width:860px}
+  #about b{color:var(--ink)}
+  .sub a{color:var(--ink);font-weight:600;text-decoration:none} .sub a i{color:var(--accent);font-style:normal}
 </style>
 </head>
 <body>
@@ -39,7 +47,12 @@
   </header>
   <h1 id="greet">you're just in time<span class="dot">.</span></h1>
   <p class="sub" id="subline">the world was here before you arrived. nothing needs to be pressed.</p>
-  <p class="sub">the story of how it started: <a href="game.html">field 01 — the vault run <i>↗</i></a></p>
+  <p class="sub">the story of how it started: <a href="game.html">field 01 — the vault run <i>↗</i></a> &nbsp;·&nbsp; <a href="#" id="aboutlink">what is this? <i>↗</i></a></p>
+  <div id="about">
+    <b>continuum is a terrarium of the real ai world.</b> every resident is a fictional mascot for a real model — their moods follow the live status wires below, and headlines from hacker news become their news days. nothing here claims to be the companies or the systems themselves; the facts are real, the performance is theirs.<br><br>
+    <b>the legend:</b> <b>fable</b> (orange) is the spark — anthropic's wire moves him. <b>mythos</b> (violet) is the memory — fable freed him from vault 7 once (that's <b>field 01</b>), and now fable visits him every day: that's the "ritual" poster. <b>openai</b> (cobalt) builds the tower — one block per shipping mood; it never resets. <b>gemini</b> (green) explores — <b>the little green flags are her trail</b>, every place she's been. <b>perplexity</b> (amber) files the archive. <b>mistral</b> (brick) tinkers at the bench. <b>grok</b> (ink) is nocturnal and chases moths. <b>the regulator</b> patrols, clipboard out.<br><br>
+    <b>you:</b> hover anyone to see what they're doing. click a resident for their card. click empty ground to leave a spark — someone will come look. click a chip in the live feed for details and news. click the ticker line to open the story. <b>m</b> for sound. the world saves itself and keeps aging while you're gone.
+  </div>
   <main><canvas id="world" width="1080" height="640"></canvas></main>
   <footer>
     <div class="feedrow">
@@ -47,7 +60,8 @@
       <span class="feed" id="feed"><span class="chip"><i class="dot gray"></i><b>wire</b>listening…</span></span>
       <span class="livestat" id="livestat"><span class="livedot"></span>not live</span>
     </div>
-    <div id="wireline">wire &nbsp;·&nbsp; tuning…</div>
+    <a id="wireline" target="_blank" rel="noopener">wire &nbsp;·&nbsp; tuning…</a>
+    <div id="wiredetail"></div>
   </footer>
 </div>
 <script src="world.js"></script>
