@@ -1,3 +1,3 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-python3 -m http.server 8787
+python3 server.py 8787
