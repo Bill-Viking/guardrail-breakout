@@ -34,6 +34,10 @@ let world = { first: Date.now(), last: Date.now(), visits: 0, tower: 2, books: 3
 try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (s && s.first) world = s; } catch (e) { }
 world.seenNews = world.seenNews || [];
 world.flags = (world.flags || []).map(f => ({ x: f.x, y: f.y, d: f.d || 1 })).slice(-12);
+world.arc = world.arc || '';                 // the director's current storyline
+world.arcLog = world.arcLog || [];           // last 5 storylines, fed back to the director each tick
+world.glosses = world.glosses || {};         // headline key -> plain-words explanation (cached per headline)
+world.ritualPosterDay = world.ritualPosterDay || 0; // the daily-ritual poster fires at most once per day
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -120,7 +124,11 @@ function showWireDetail(id, refresh) {
   let h = `${toneDot}<b>${id}</b> — ${s.word} &nbsp; <a href="${STATUS_PAGES[id]}" target="_blank" rel="noopener">status page <i>↗</i></a><br>`;
   if (s.tone === 'gray') h += `x.ai and mistral publish status for humans only — no wire a browser may read. the link above is the real page.<br>`;
   if (s.incidents && s.incidents.length) h += 'open incidents: ' + s.incidents.map(i => `<a href="${i.url}" target="_blank" rel="noopener">${i.name.toLowerCase()}</a>`).join(' · ') + '<br>';
-  if (n && n.items.length) h += 'on the news wire (48h): ' + n.items.map(it => `<a href="${it.url}" target="_blank" rel="noopener">${it.title.toLowerCase().slice(0, 70)}${it.title.length > 70 ? '…' : ''}</a> <a href="${it.hn}" target="_blank" rel="noopener">(hn ${it.points})</a>`).join('<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;') + '<br>';
+  if (n && n.items.length) h += 'on the news wire (48h):<br>' + n.items.map(it => {
+    const g = world.glosses[id + '::' + it.title]; enqueueGloss(id, it.title); // linked headline = fact; the gloss below is a generated aid
+    return `&nbsp;&nbsp;<a href="${it.url}" target="_blank" rel="noopener">${it.title.toLowerCase().slice(0, 70)}${it.title.length > 70 ? '…' : ''}</a> <a href="${it.hn}" target="_blank" rel="noopener">(hn ${it.points})</a>`
+      + (g ? `<br>&nbsp;&nbsp;<span class="gloss">plain words (ai gloss): ${g}</span>` : '');
+  }).join('<br>') + '<br>';
   else h += 'nothing on the news wire in the last 48 hours.<br>';
   // hard line between fact and theater: everything above is real and linked;
   // the mascot's day is fiction and says so.
@@ -174,6 +182,7 @@ async function fetchNews() {
       const top = hits[0];
       const items = hits.slice(0, 3).map(h => ({ title: h.title, points: h.points, url: h.url || ('https://news.ycombinator.com/item?id=' + h.objectID), hn: 'https://news.ycombinator.com/item?id=' + h.objectID }));
       news[id] = { title: top.title, points: top.points, cls: classifyNews(top.title), url: items[0].url, hn: items[0].hn, items };
+      items.forEach(it => enqueueGloss(id, it.title)); // let the director gloss each headline
       applyNews(id, news[id]);
     } catch (e) { }
   }));
@@ -217,6 +226,148 @@ async function storytellerLine(e, item) {
     const line = (j.response || '').trim().split('\n')[0].replace(/["']/g, '').toLowerCase().slice(0, 56);
     if (line) say(e, line, 0, e.color === INK ? MUT : e.color);
   } catch (e2) { }
+}
+
+/* ---------------- the story director (local llm as showrunner) ----------------
+   The LLM never draws, codes, or mutates the world directly. Every ~3 min (and
+   on triggers: news changed, wire tone changed, a user intervention) it returns
+   ONE strict json beat-contract; the engine performs it with the same
+   pickTarget / say / announce it already uses. Bad output is discarded silently.
+   Ollama absent → this whole layer stays inert and the world runs on templates,
+   exactly like v0.9.1. Beats are theater: they move residents and raise posters;
+   they never write into the factual (linked) sections of any panel. */
+const DIRECTOR_SYS = [
+  'You are the Showrunner for "Continuum", a quiet Swiss terrarium of fictional mascots for real AI models.',
+  'You DIRECT; the engine PERFORMS. Emit ONE compact json object and nothing else — no prose, no markdown, no facts.',
+  'Resident ids (use exactly these): fable, mythos, openai, gemini, perplexity, mistral, grok, "the regulator".',
+  'Landmark ids for "to": tower, archive, bench, vault, frontier. "to" may also be null.',
+  '"do" MUST be one of exactly: goto, meet, say, chase, hide, celebrate, inspect, poster. No other verbs.',
+  'Grow the story from the current arc and today\'s news: a headline about a model becomes that mascot\'s day — celebration, defensiveness, rivalry, or gossip. Gentle, deadpan, family-friendly. Never repeat the recent arcs.',
+  'Shape: {"arc":"one short line","beats":[{"who":id,"do":verb,"to":id-or-null,"line":"<=8 lowercase words or null","poster":object-or-null}]}',
+  'poster is used ONLY when do="poster": {"kicker":"<=40 chars","word":"oneword.","tone":"green|amber|red|cobalt|violet|ink","sub":"<=70 chars"}. Otherwise poster is null.',
+  'Aim for 3 to 4 beats and, when there is news, include one "poster" beat that reacts to a specific headline. Keep every line short. Output only the json.',
+  'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","beats":[{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"fable","do":"goto","to":"openai","line":"show me.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
+].join(' ');
+
+let directorBusy = false, directorCd = 25, beatQueue = [], beatClock = 0;
+let interventions = []; // the user's recent moves/directives — fed to the director, capped 5
+function recordIntervention(iv) { interventions.push(iv); interventions = interventions.slice(-5); pokeDirector(); }
+function pokeDirector() { if (ollamaModel && !directorBusy && directorCd > 10) directorCd = 8; } // debounced trigger
+
+function buildDirectorState() {
+  return {
+    day: worldDay, time: isNight() ? 'night' : 'day',
+    world: { tower: world.tower, books: world.books, flags: world.flags.length },
+    arc: world.arc || '',
+    recentArcs: (world.arcLog || []).slice(-5),
+    residents: entities.map(e => ({ id: e.id, personality: e.desc, district: districtOf(e.x, e.y), doing: stateWord(e), wire: e.wireId ? (wire[e.wireId] || {}).tone || 'gray' : 'none' })),
+    landmarks: ['tower', 'archive', 'bench', 'vault', 'frontier'],
+    news: Object.entries(news).map(([id, n]) => ({ id, title: n.title.slice(0, 90), points: n.points, cls: n.cls })),
+    interventions: interventions.slice(-5),
+  };
+}
+/* validate hard: only known ids/actions survive; unknown → drop that beat, keep
+   the rest; nothing usable → discard the whole tick and keep template life. */
+function coerceDirector(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const arc = typeof obj.arc === 'string' ? obj.arc.trim().slice(0, 120) : (world.arc || '');
+  const DO = ['goto', 'meet', 'say', 'chase', 'hide', 'celebrate', 'inspect', 'poster'];
+  const TONES = { green: GREENC, amber: AMBER, red: RED, cobalt: COBALT, violet: VIOLET, ink: INK };
+  const beats = [];
+  for (const b of (Array.isArray(obj.beats) ? obj.beats : [])) {
+    if (beats.length >= 6) break;
+    if (!b || typeof b !== 'object' || !DO.includes(b.do) || !byId[b.who]) continue;
+    let to = b.to; if (to === 'null' || to === '') to = null;
+    if (to != null && !byId[to] && !LANDMARKS[to]) continue; // unknown target → drop the beat
+    let line = b.line; if (line === 'null') line = null;
+    if (typeof line === 'string') { line = line.trim().toLowerCase().replace(/["']/g, ''); line = line ? line.split(/\s+/).slice(0, 8).join(' ') : null; } else line = null;
+    let poster = null;
+    if (b.do === 'poster') {
+      const p = b.poster || {};
+      const word = (typeof p.word === 'string' ? p.word : '').trim().split(/\s+/)[0] || '';
+      if (!word) continue; // a poster with no word is unusable
+      poster = { kicker: (typeof p.kicker === 'string' ? p.kicker : '').trim().slice(0, 40) || 'continuum', word: word.toLowerCase().slice(0, 18), toneColor: TONES[p.tone] || INK, sub: (typeof p.sub === 'string' ? p.sub : '').trim().slice(0, 70) };
+    }
+    beats.push({ who: b.who, do: b.do, to, line, poster });
+  }
+  return beats.length ? { arc, beats } : null;
+}
+function parseLoose(s) { // tolerate a stray wrapper; truncated/unbalanced json still fails → discarded
+  if (typeof s !== 'string') return null;
+  try { return JSON.parse(s); } catch (e) { }
+  const a = s.indexOf('{'), b = s.lastIndexOf('}');
+  if (a >= 0 && b > a) try { return JSON.parse(s.slice(a, b + 1)); } catch (e) { }
+  return null;
+}
+function locOf(to) { if (!to) return null; if (byId[to]) return { x: byId[to].x, y: byId[to].y }; return LANDMARKS[to] || null; }
+function executeBeat(b) {
+  const e = byId[b.who]; if (!e || e.state === 'down') return; // never yank a resident who's down
+  const loc = locOf(b.to);
+  const goNear = (p, spread) => { if (!p) return; e.tx = clamp(p.x + (Math.random() - .5) * spread, M + 24, W - M - 24); e.ty = clamp(p.y + (Math.random() - .5) * spread * .6, BAND_TOP, GROUND - 6); e.state = 'walk'; };
+  switch (b.do) {
+    case 'goto': goNear(loc, 40); break;
+    case 'meet': goNear(loc, 56); break;
+    case 'chase': goNear(loc, 12); if (e.kind === 'wildcard') e.flip = 1; break;
+    case 'hide': goNear({ x: ux(e.home[0]), y: e.home[1] }, 20); e.scared = Math.max(e.scared || 0, 4); break;
+    case 'celebrate': confetti(e.x, e.y); e.hop = 1; e.medalT = Math.max(e.medalT, 120); break;
+    case 'inspect': goNear(loc, 20); break;
+    case 'say': break; // the line below carries it
+    case 'poster': if (b.poster) announce(b.poster.kicker, b.poster.word, b.poster.toneColor, b.poster.sub, e); break;
+  }
+  if (b.line) say(e, b.line, .2, e.color === INK ? MUT : e.color);
+}
+async function runDirector() {
+  if (directorBusy || !ollamaModel) return;
+  directorBusy = true;
+  try {
+    const r = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({ model: ollamaModel, stream: false, format: 'json', options: { temperature: .85, num_predict: 800 }, system: DIRECTOR_SYS, prompt: JSON.stringify(buildDirectorState()) }),
+    });
+    const j = await r.json();
+    let obj = parseLoose(j.response);
+    const ok = coerceDirector(obj);
+    if (ok) {
+      if (world.arc && world.arc !== ok.arc) { world.arcLog = (world.arcLog || []); world.arcLog.push(world.arc); world.arcLog = world.arcLog.slice(-5); }
+      world.arc = ok.arc; saveWorld();
+      beatQueue = ok.beats.map((b, i) => ({ beat: b, at: 6 + i * (168 / ok.beats.length) })); beatClock = 0;
+      interventions = []; // cleared after each successful director tick
+    }
+  } catch (e) { /* offline or unreadable: discard silently, template life continues */ }
+  directorBusy = false;
+  directorCd = 175 + Math.random() * 30; // next tick in ~3 min
+}
+function updateDirector(dt) {
+  if (!ollamaModel) return; // Ollama absent → no director at all; the world runs on templates
+  if (directorCd > 0) directorCd -= dt;
+  if (directorCd <= 0 && !directorBusy && !glossBusy) { directorCd = 175; runDirector(); }
+  if (beatQueue.length) { // perform queued beats, spread across the ~3 min
+    beatClock += dt;
+    for (let i = beatQueue.length - 1; i >= 0; i--) if (beatClock >= beatQueue[i].at) { executeBeat(beatQueue[i].beat); beatQueue.splice(i, 1); }
+  }
+  processGloss();
+}
+/* news glosses: one director call per headline, cached in the save — "explain
+   this headline in one plain lowercase sentence for a curious non-expert."
+   Shown under the linked headline (clearly labelled, theater colour) and used
+   by the narrator. One in flight at a time; never overlaps a director tick. */
+let glossQueue = [], glossBusy = false;
+function enqueueGloss(id, title) {
+  if (!ollamaModel || !title) return;
+  const key = id + '::' + title;
+  if (world.glosses[key] !== undefined || glossQueue.some(g => g.key === key)) return;
+  glossQueue.push({ key, title });
+}
+function processGloss() {
+  if (glossBusy || directorBusy || !ollamaModel || !glossQueue.length) return;
+  const g = glossQueue.shift(); glossBusy = true;
+  fetch('http://localhost:11434/api/generate', {
+    method: 'POST',
+    body: JSON.stringify({ model: ollamaModel, stream: false, options: { temperature: .4, num_predict: 60 }, prompt: `Explain this ai-news headline in ONE plain lowercase sentence for a curious non-expert. No preamble, no quotation marks. Headline: "${g.title}"` }),
+  }).then(r => r.json()).then(j => {
+    let s = (j.response || '').trim().split('\n')[0].replace(/^["']+|["']+$/g, '').replace(/\s+/g, ' ').toLowerCase().slice(0, 160);
+    if (s) { world.glosses[g.key] = s; saveWorld(); if (detailId) showWireDetail(detailId, true); }
+  }).catch(() => { }).finally(() => { glossBusy = false; });
 }
 
 /* ---------------- little systems ---------------- */
@@ -321,6 +472,10 @@ const ARCHIVE = { x: ux(.68), y: 424 };   // perplexity's shelves
 const BENCH = { x: ux(.40), y: 474 };     // mistral's workshop
 const VAULT = { x: ux(.27), y: 340 };     // open. a monument now.
 const PERIMETER = [[M + 26, BAND_TOP + 6], [W - M - 26, BAND_TOP + 6], [W - M - 26, GROUND - 8], [M + 26, GROUND - 8]];
+const FRONTIER = { x: ux(.84), y: 280 };  // gemini's district (no structure, just open ground)
+// the districts the director names and the user drops residents into
+const LANDMARKS = { tower: { x: TOWER.x, y: TOWER.y + 20 }, archive: ARCHIVE, bench: BENCH, vault: VAULT, frontier: FRONTIER };
+function districtOf(x, y) { let best = 'frontier', bd = 1e9; for (const k in LANDMARKS) { const d = Math.hypot(LANDMARKS[k].x - x, LANDMARKS[k].y - y); if (d < bd) { bd = d; best = k; } } return best; }
 
 /* ---------------- behavior ---------------- */
 function pickTarget(e) {
@@ -385,7 +540,12 @@ function updateRitual(dt) {
     speeches.push({ sym: true, x: (f.x + m.x) / 2, y: Math.min(f.y, m.y) - 46, t: 0, life: 2.4 });
     say(f, 'found you.', .1, ACCENT); say(m, 'still here.', 1.2, VIOLET);
     sfx.chime(); ritualT = 60 + Math.random() * 30;
-    announce('the daily ritual — vault 7', 'found you.', VIOLET, 'fable visits mythos every day. they were separated once — that story is field 01.', f, { sym: true, prio: 2 });
+    // the hand-coded ritual poster fires at most once a day (it used to loop every ~90s);
+    // the director may stage its own ritual variations otherwise.
+    if (world.ritualPosterDay !== worldDay) {
+      world.ritualPosterDay = worldDay; saveWorld();
+      announce('the daily ritual — vault 7', 'found you.', VIOLET, 'fable visits mythos every day. they were separated once — that story is field 01.', f, { sym: true, prio: 2 });
+    }
   }
 }
 /* mythos keeps company with whoever is down. that's the whole point of him. */
@@ -491,6 +651,7 @@ function update(dt) {
   updateMeetings(dt);
   updateRitual(dt);
   updateComfort(dt);
+  updateDirector(dt);
   updatePosters(dt);
   // dusk and dawn are events too
   const n = isNight();
