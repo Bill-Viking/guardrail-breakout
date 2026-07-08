@@ -557,8 +557,9 @@ async function wikiLookup(q) { // fact source: wikipedia search → page summary
 }
 async function hnLookup(q) { // fact source: the same wire the news already rides
   try {
-    const r = await fetch('https://hn.algolia.com/api/v1/search?query=' + encodeURIComponent(q) + '&tags=story&hitsPerPage=3', { cache: 'no-store' });
-    return ((await r.json()).hits || []).filter(h => h.title).map(h => ({ title: h.title, points: h.points || 0, url: h.url || ('https://news.ycombinator.com/item?id=' + h.objectID), hn: 'https://news.ycombinator.com/item?id=' + h.objectID }));
+    const r = await fetch('https://hn.algolia.com/api/v1/search?query=' + encodeURIComponent(q) + '&tags=story&hitsPerPage=8', { cache: 'no-store' });
+    return ((await r.json()).hits || []).filter(h => h.title && (h.points || 0) >= 10).slice(0, 2) // fuzzy low-point matches are noise, not sources
+      .map(h => ({ title: h.title, points: h.points || 0, url: h.url || ('https://news.ycombinator.com/item?id=' + h.objectID), hn: 'https://news.ycombinator.com/item?id=' + h.objectID }));
   } catch (e) { return []; }
 }
 async function composeAnswer(q, sources) { // the gloss: separate call, separate prompt, never the director's
