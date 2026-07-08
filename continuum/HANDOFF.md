@@ -4,7 +4,7 @@
 source of truth. If you are an AI session reading this: read `DIRECTOR_SPEC.md`, `CHARACTERS.md`,
 and `README.md` next, then check `git log --oneline -10` for anything newer than this file.
 
-## State as of Jul 6, 2026 (v1.2 + §10 rulings)
+## State as of Jul 8, 2026 (v2.0 tier 1 shipped)
 
 SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
 - v0.x: the terrarium (blocky residents, persistence, posters, news wire, live status wire)
@@ -24,17 +24,32 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   HANDOFF.md; GPT Codex is its read-only checker; Bill's GPT 5.5 Pro chat is strategy
   partner only. The two projects connect ONLY through committed files (journal export +
   local bridge per the rulings) — never shared code, never shared sessions.
+- Jul 8 (Fable session): **v2.0 §10 Tier 1 SHIPPED** — the journal (localStorage ring,
+  cap 200, `ct_journal_v1`, full consumer-contract schema incl. model digest, sha256s,
+  beat ids, fiction-domain marker), the evening judge pass (once/day after the resolution
+  poster, validate-hard, ruling journaled with provenance, journal-only — no UI), the two
+  footer doors ("download journal" JSONL / "export for continuum" legacy-import markdown),
+  and the `?director=<model>` A/B override. Verified live with qwen2.5:32b: real exchange
+  journaled, real judge ruling, ring cap + reload survival, and the markdown export was
+  parsed by Continuum's OWN `parse_markdown_log` — 2/2 entries active, uuids preserved.
+  Judge evidence spans = each contradiction must quote the offending line; full
+  span-anchoring deferred to Tier 2 per the amendment's sequencing.
 
 ## Open threads (in priority order)
 
-1. **Bill plays §6–§9** — http://localhost:8787 after `./run_local_server.command`.
+1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
    Judge: nervous residents around the Regulator, probing inspections, census section in a
-   wire chip's detail panel, the day's episode line advancing act i → iii.
-2. **§10 Tier 1 build (Opus session):** journal ring buffer + judge pass + "download
-   journal" / "export for continuum" links, exactly per the §10 review rulings in
-   DIRECTOR_SPEC.md. Tier 2 (live wake/outcome loop + server.py bridge) is ruled but
-   GATED: build only after Tier 1 ships and Bill runs Continuum's Mind Console locally.
-3. Backlog ideas, unscheduled: GitHub Pages deploy; desktop/menu-bar wrap; visiting mascots
+   wire chip's detail panel, the day's episode line advancing act i → iii, and after an
+   evening or two: the footer journal links (download + export).
+2. **The Tier-1 round-trip with Bill (ruling 6):** export → drop the .md into Continuum's
+   `logs/raw_conversations/` → Continuum imports and consolidates it. One manual round
+   trip before calling Tier 1 done-done (the importer already parses our export — verified
+   from source this session — but Bill should see the full loop once himself).
+3. **§10 Tier 2 (live wake/outcome loop + server.py bridge):** ruled but GATED — build
+   only after the round-trip above and Bill running Continuum's Mind Console locally.
+   Also gated from the OTHER side: Continuum ingests nothing until its Experiment 03
+   report closes, then 2–4 weeks tap-only observation (amendment sequencing).
+4. Backlog ideas, unscheduled: GitHub Pages deploy; desktop/menu-bar wrap; visiting mascots
    from recurring census labs.
 
 ## Working protocol (Bill's rules)
