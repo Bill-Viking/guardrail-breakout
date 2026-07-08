@@ -24,6 +24,18 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   HANDOFF.md; GPT Codex is its read-only checker; Bill's GPT 5.5 Pro chat is strategy
   partner only. The two projects connect ONLY through committed files (journal export +
   local bridge per the rulings) — never shared code, never shared sessions.
+- Jul 8 later (same Fable session): **v2.1 §11 SHIPPED — the archive answers.** A quiet
+  footer command line: `ask <question>` (or bare text) → perplexity walks it to the archive,
+  files it (a real book shelves), and an amber card reveals — wikipedia + hn sources linked
+  as fact, a composed answer as marked gloss. `read <url>` → new guarded `GET /read` in
+  server.py (SEPARATE from the §9 relay, which is untouched per §10 ruling 5): https/443
+  only, all resolved addresses must be public (10 SSRF probes verified refused, redirects
+  re-checked), text extracted server-side. Injection containment: fetched text never reaches
+  the director, interventions, or the journal; research is its own RESEARCH_SYS call.
+  Hotkeys ignore form-field keystrokes. `.claude/launch.json` now launches server.py (was
+  stale pre-§9 http.server). Verified live: real ask ("who invented the transistor" →
+  bardeen/brattain/shockley, linked), real read (wikipedia Transistor page), zero console
+  errors. Spec: DIRECTOR_SPEC.md §11.
 - Jul 8 (Fable session): **v2.0 §10 Tier 1 SHIPPED** — the journal (localStorage ring,
   cap 200, `ct_journal_v1`, full consumer-contract schema incl. model digest, sha256s,
   beat ids, fiction-domain marker), the evening judge pass (once/day after the resolution

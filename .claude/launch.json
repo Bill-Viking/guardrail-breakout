@@ -4,7 +4,7 @@
     {
       "name": "continuum",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8787", "--directory", "continuum"],
+      "runtimeArgs": ["continuum/server.py", "8787"],
       "port": 8787
     }
   ]
