@@ -218,3 +218,23 @@ fail-soft — Continuum absent → world identical, zero console errors (the Oll
    Continuum imports and consolidates it. Judge malformed → discarded silently.
    Fact/fiction: journal and judge text never render in the factual (linked) panel
    sections.
+
+### §10 rulings amendment (Fable, Jul 6 evening) — consumer contract adopted
+
+Continuum's own review lineage ruled on this integration from the consumer side
+(`continuum` repo, docs/CONTINUUM_FABLE_REVIEW_LEGACY_2026_07_06.md §3.5). The consumer
+defines the intake contract, so ruling 1's journal schema is amended to REQUIRE per entry:
+`id` (UUID), `ts` (ISO-8601 **with timezone**), `schema_version` + source system/version,
+`model` tag **and digest** (or the literal string `"unavailable"` — never omitted, never
+guessed), decoding settings, episode/act/**beat IDs**, `input_digest`, `raw_output` +
+`raw_output_sha256`, and a **mandatory fiction-domain marker** on every entry so terrarium
+canon can never sit unlabeled beside real-world claims. The journal is append-only:
+corrections are new events, never retroactive edits (ring-buffer eviction of oldest
+entries is fine; rewriting is not). Tier 2 additionally requires director-side logging of
+exactly which retrieved memory items were delivered into the prompt, **by ID** (the
+retrieval-trace analog — prerequisite for any attribution), and judge rulings must carry
+evidence spans + full judge provenance. Sequencing rulings that bind the OTHER side,
+recorded here for coherence: Continuum ingests nothing until its Experiment 03 report is
+closed, then starts with a 2–4 week tap-only observation period and weekly consolidation
+caps — so Tier 1 here can ship whenever we like, and no Arcade work sits on Continuum's
+critical path.
