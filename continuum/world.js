@@ -366,7 +366,7 @@ const JOURNAL_LAW = 'this journal is evidence about the fiction layer of the con
 let journal = [];
 try { const _j = JSON.parse(localStorage.getItem(JOURNAL_KEY) || 'null'); if (Array.isArray(_j)) journal = _j.slice(-JOURNAL_CAP); } catch (e) { }
 function saveJournal() { try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(journal)); } catch (e) { } }
-function journalAppend(entry) { journal.push(entry); if (journal.length > JOURNAL_CAP) journal = journal.slice(-JOURNAL_CAP); saveJournal(); }
+function journalAppend(entry) { journal.push(entry); if (journal.length > JOURNAL_CAP) journal = journal.slice(-JOURNAL_CAP); saveJournal(); updateJournalLinks(); }
 function uuid4() {
   try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) { }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
@@ -466,6 +466,59 @@ async function runJudge() {
     world.judgedDay = worldDay; saveWorld();
   } catch (e) { judgeCd = 180; /* ollama unreachable — try again later this evening */ }
   judgeBusy = false;
+}
+/* §10 — the journal's two doors (theater-layer footer). "download journal" is
+   the raw JSONL evidence stream, header line first. "export for continuum"
+   renders the same entries in Continuum's legacy import format — verified
+   against the importer's ENTRY_PATTERN (runtime/events.py): "## YYYY-MM-DD
+   HH:MM:SS", an optional "<!-- event_id: … -->" carrying our uuid, then the
+   REQUIRED "role: content" line. Bill drops the file into Continuum's
+   logs/raw_conversations/; zero continuum-side code. The links only appear
+   once entries exist — without ollama, nothing renders. */
+function updateJournalLinks() { const el = document.getElementById('journallinks'); if (el) el.style.display = journal.length ? 'block' : 'none'; }
+function downloadText(name, text, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function journalJsonl() {
+  const header = { type: 'header', schema_version: JOURNAL_SCHEMA, source: JOURNAL_SOURCE, domain: FICTION_DOMAIN, law: JOURNAL_LAW, exported: isoTs(), entries: journal.length, cap: JOURNAL_CAP };
+  return [header].concat(journal).map(e => JSON.stringify(e)).join('\n') + '\n';
+}
+/* one-paragraph digest of one exchange, for the legacy import. every paragraph
+   opens with the fiction marker, and none may start with "/" or a shell word —
+   continuum quarantines those (classify_legacy_content). */
+function mdDigest(en) {
+  if (en.type === 'judge') {
+    const r = en.ruling;
+    return '[fiction layer] evening judge for day ' + en.day + ' of the terrarium episode "' + (en.episode || 'untitled') + '" (model ' + en.model + '): '
+      + (r ? 'score ' + r.score + '/5; the morning callback ' + (r.callback_match ? 'matched' : 'missed') + ' yesterday\'s arc; '
+        + (r.contradictions.length ? 'contradictions: ' + r.contradictions.join(' | ') : 'no contradictions')
+        + '. judgment: ' + r.judgment
+        : 'the ruling failed validation and was discarded; the raw exchange is preserved in the jsonl journal.');
+  }
+  const beats = (en.beats_kept || []).map(b => b.who + ' ' + b.do + (b.to ? ' to ' + b.to : '') + (b.line ? ' saying "' + b.line + '"' : '') + (b.poster ? ' raising the poster "' + b.poster.word + '"' : '')).join('; ');
+  return '[fiction layer] director exchange, day ' + en.day + ', act ' + en.act + ' of the terrarium episode "' + (en.episode || 'untitled') + '" (model ' + en.model + '): '
+    + (beats ? 'staged ' + en.beats_kept.length + ' beat' + (en.beats_kept.length > 1 ? 's' : '') + ' — ' + beats + '.' : 'no usable beats survived validation.')
+    + (en.beats_dropped ? ' ' + en.beats_dropped + ' beat' + (en.beats_dropped > 1 ? 's were' : ' was') + ' dropped in validation.' : '')
+    + (en.callback ? ' the morning callback to yesterday ("' + (en.callback.expected || '') + '") opened with "' + (en.callback.first_line || '') + '".' : '')
+    + (en.input_digest && en.input_digest.arc ? ' arc going in: "' + en.input_digest.arc + '".' : '');
+}
+function exportContinuumMd() {
+  const out = [
+    '<!-- continuum-arcade journal export, legacy import format.',
+    '     ' + JOURNAL_LAW,
+    '     source: ' + JOURNAL_SOURCE.system + ' ' + JOURNAL_SOURCE.version + ' · schema ' + JOURNAL_SCHEMA + ' · exported ' + isoTs() + ' -->',
+    '',
+  ];
+  for (const en of journal) {
+    out.push('## ' + en.ts.slice(0, 10) + ' ' + en.ts.slice(11, 19));
+    out.push('<!-- event_id: ' + en.id + ' -->');
+    out.push((en.type === 'judge' ? 'terrarium-judge' : 'terrarium-director') + ': ' + mdDigest(en));
+    out.push('');
+  }
+  return out.join('\n');
 }
 
 /* ---------------- the story director (local llm as showrunner) ----------------
@@ -1643,6 +1696,12 @@ const feedEl = document.getElementById('feed');
 if (feedEl) feedEl.addEventListener('click', ev => { const chip = ev.target.closest('.chip'); if (chip && chip.dataset.id) showWireDetail(chip.dataset.id); });
 const aboutLink = document.getElementById('aboutlink');
 if (aboutLink) aboutLink.addEventListener('click', ev => { ev.preventDefault(); const a = document.getElementById('about'); if (a) a.style.display = a.style.display === 'block' ? 'none' : 'block'; });
+// §10 — the journal's two doors
+const dlJournal = document.getElementById('dljournal');
+if (dlJournal) dlJournal.addEventListener('click', ev => { ev.preventDefault(); if (journal.length) downloadText('continuum-arcade-journal.jsonl', journalJsonl(), 'application/x-ndjson'); });
+const dlContinuum = document.getElementById('dlcontinuum');
+if (dlContinuum) dlContinuum.addEventListener('click', ev => { ev.preventDefault(); if (journal.length) downloadText('terrarium_journal_' + isoTs().slice(0, 10) + '.md', exportContinuumMd(), 'text/markdown'); });
+updateJournalLinks(); // reload with an existing journal → the doors are already there
 
 /* ---------------- welcome back ---------------- */
 (function greet() {

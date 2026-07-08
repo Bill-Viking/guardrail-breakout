@@ -36,6 +36,10 @@
   #wiredetail a i{color:var(--accent);font-style:normal}
   /* a generated plain-words gloss: theater, not fact — never linked, always marked */
   #wiredetail .gloss{color:var(--faint);font-style:italic}
+  /* §10 — the journal's two doors: theater layer, quiet, only there once entries exist */
+  #journallinks{display:none;margin-top:12px;font-size:11px;color:var(--faint)}
+  #journallinks a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
+  #journallinks a:hover{color:var(--ink)}
   #about{display:none;border:1px solid var(--hair);padding:16px 20px;margin:12px 0 4px;font-size:13px;color:var(--mut);line-height:1.75;max-width:860px}
   #about b{color:var(--ink)}
   .sub a{color:var(--ink);font-weight:600;text-decoration:none} .sub a i{color:var(--accent);font-style:normal}
@@ -64,6 +68,7 @@
     </div>
     <a id="wireline" target="_blank" rel="noopener">wire &nbsp;·&nbsp; tuning…</a>
     <div id="wiredetail"></div>
+    <div id="journallinks">the director's journal — evidence about the fiction layer, nothing more: <a href="#" id="dljournal">download journal</a> · <a href="#" id="dlcontinuum">export for continuum</a></div>
   </footer>
 </div>
 <script src="world.js"></script>
