@@ -50,6 +50,19 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   Judge evidence spans = each contradiction must quote the offending line; full
   span-anchoring deferred to Tier 2 per the amendment's sequencing.
 
+- Jul 8 night: **§12 partial + §13 drafted.** Shipped: engine-level anti-loop law (ambient
+  posters once/day — "self-evolving, not looping" is Bill's stated law) + brave `/search`
+  door in server.py (key-gated via gitignored `search_key.json`, fail-soft to wikipedia+hn)
+  + from-memory fallback with explicit warning. Dropped: weather special-case (Bill).
+  PENDING Bill: paste a Brave key (brave.com/search/api, free tier) into
+  `continuum/search_key.json` as `{"brave":"<key>"}` — no restart needed; review §13
+  (self-evolving terrarium: bonds, weekly foundations, chapter memory, census visitors) in
+  DIRECTOR_SPEC.md; re-confirm or kill talk-to-residents (§12, spec'd, unbuilt).
+  **Bigger thread from tonight: Bill is questioning the terrarium's purpose** ("drifting on
+  why we need this"). Fable's read: its two honest identities are ambient art + Continuum's
+  evidence instrument; the assistant lane is a dead end. The §10 round-trip with Continuum
+  is the test that decides it. Don't pitch new features until that lands.
+
 ## Open threads (in priority order)
 
 1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
