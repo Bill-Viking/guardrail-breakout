@@ -90,6 +90,20 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   Search UI disambiguated: 'filed by perplexity (our librarian)' + card says 'web via
   tavily' (provider reported by /search).
 
+- Jul 11 night: **§15 spec'd (the professional-grade foundation) + §15b SHIPPED.** Bill's
+  mandate: "rich and really entertaining... professional grade." §15b (the visible story)
+  is live: the playbill (violet 'today's story ›' footer door — the day's performed beats
+  as a readable script, act by act, persisted per day), scenes (a targeted beat's line is
+  delivered on ARRIVAL with the landmark's gesture — book at archive, brow at tower,
+  crouch at bench, settle at pond, touch at vault), 45s stranded-delivery fallback.
+  **NEXT BUILD: §15a — the model broker** (spec'd in DIRECTOR_SPEC.md §15a, unbuilt):
+  /llm route in server.py, gitignored model_config.json (provider ollama|anthropic,
+  per-role routing, daily budget cap → 402 → silent local fallback), llmCall() choke
+  point in world.js with direct-ollama fallback when /llm is absent, provider+model in
+  footer and journal. Bill will need an Anthropic API key + a daily budget number when
+  it lands. After 15a: §16 (richer director contract — dialogue scenes, multi-day arcs)
+  gets spec'd against whichever brain wins the journal A/B.
+
 ## Open threads (in priority order)
 
 1. **Bill plays §6–§10** — http://localhost:8787 after `./run_local_server.command`.
