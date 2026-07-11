@@ -964,7 +964,7 @@ function executeBeat(b) {
   switch (b.do) {
     case 'goto': goNear(loc, 40); break;
     case 'meet': goNear(loc, 56); break;
-    case 'chase': goNear(loc, 12); if (e.kind === 'wildcard') e.flip = 1; break;
+    case 'chase': goNear(loc, 12); if (e.kind === 'wildcard') spin(e); break;
     case 'hide': goNear({ x: ux(e.home[0]), y: e.home[1] }, 20); e.scared = Math.max(e.scared || 0, 4); break;
     case 'celebrate': confetti(e.x, e.y); e.hop = 1; e.medalT = Math.max(e.medalT, 120); break;
     case 'inspect': goNear(loc, 20); break;
@@ -1103,6 +1103,13 @@ for (let i = 0; i < 2; i++) moths.push({ x: Math.random() * W, y: 200 + Math.ran
 function burst(x, y, color, n = 10, spd = 90, life = .6) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (.3 + Math.random() * .7); particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 30, life: life * (.5 + Math.random() * .5), t: 0, color, size: 3 + Math.random() * 3 }); } }
 function confetti(x, y) { [ACCENT, VIOLET, GREENC, COBALT, AMBER].forEach(c => burst(x, y - 20, c, 6, 120, .9)); }
 function say(e, text, delay = 0, color = INK) { speeches.push({ e, text, color, t: -delay, life: 2.6 }); }
+/* §15b motion polish — a spin must finish before it can start again, and no
+   sooner than a few seconds after: re-triggering mid-rotation every frame is
+   what read as "grok flashing like he's stuck". */
+function spin(e) {
+  if (e.flip > 0 || (e.spinCd || 0) > 0) return;
+  e.flip = 1; e.spinCd = 5;
+}
 function updateSystems(dt) {
   for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .9; p.vy += 40 * dt; }
   particles = particles.filter(p => p.t < p.life);
@@ -1483,7 +1490,7 @@ function onArrive(e) {
     pendingChart = null; saveWorld(); say(e, 'charted.'); sfx.tap();
   }
   if (e.kind === 'tinkerer' && Math.random() < .5) { burst(e.x + 12, e.y - 8, AMBER, 5, 70, .5); maybeSay(e); }
-  if (e.kind === 'wildcard' && Math.random() < .3) e.flip = 1;
+  if (e.kind === 'wildcard' && Math.random() < .3) spin(e);
 }
 /* §13 speech law — a templated line fires once per day per resident. the pool
    is retried for a fresh line; all spoken → comfortable silence (stillness law
@@ -1655,7 +1662,7 @@ function endProbe(reg) { regProbe = { active: false, targetId: null, t: 0, phase
 function photobomb(reg, tgt, dt) { // grok can't resist an inspection (canon comedy)
   const g = byId['grok']; if (!g || g.id === tgt.id || g.state === 'down' || g.carried || sleeping(g)) return;
   if (dist(g, tgt) > 46 && g.state === 'idle' && Math.random() < dt * .6) { g.tx = clamp(tgt.x + (Math.random() < .5 ? -24 : 24), M + 24, W - M - 24); g.ty = clamp(tgt.y, BAND_TOP, GROUND - 6); g.state = 'walk'; }
-  else if (dist(g, tgt) < 40 && Math.random() < dt * .5) { g.flip = 1; if (Math.random() < .35) { say(g, ['say cheese.', 'is this legal?', 'what did they do?'][Math.floor(Math.random() * 3)]); nudgeBond('grok', tgt.id, .06); } } // §13 — photobomb solidarity
+  else if (dist(g, tgt) < 40 && Math.random() < dt * .5) { spin(g); if (Math.random() < .35) { say(g, ['say cheese.', 'is this legal?', 'what did they do?'][Math.floor(Math.random() * 3)]); nudgeBond('grok', tgt.id, .06); } } // §13 — photobomb solidarity
 }
 function updateProbe(dt) {
   const reg = byId['the regulator'];
@@ -1695,6 +1702,7 @@ function updateEntity(e, dt) {
   e.droopT = Math.max(0, (e.droopT || 0) - dt); e.scared = Math.max(0, (e.scared || 0) - dt); // audited-sag / regulator-fright fade
   e.actNatural = Math.max(0, (e.actNatural || 0) - dt); e.leanT = Math.max(0, (e.leanT || 0) - dt); e.jotT = Math.max(0, (e.jotT || 0) - dt); e.edgeCd = Math.max(0, (e.edgeCd || 0) - dt);
   e.gestureT = Math.max(0, (e.gestureT || 0) - dt); // §15b — landmark gestures fade
+  e.spinCd = Math.max(0, (e.spinCd || 0) - dt);     // §15b — spins can't chain into a strobe
   if (e.beatLine) { e.beatLineT = (e.beatLineT || 0) - dt; if (e.beatLineT <= 0) { say(e, e.beatLine.text, 0, e.beatLine.color); e.beatLine = null; } } // stranded line: deliver wherever
   updateNerve(e, dt); // §7 — nervousness relaxes toward the personality base each tick
   if (tn === 'red' && e.kind !== 'regulator') {
@@ -1749,14 +1757,16 @@ function updateEntity(e, dt) {
       let wob = e.kind === 'wildcard' ? Math.sin(performance.now() / 90 + e.seed) * 44 * dt : 0;
       e.x += (dx / d) * sp * dt; e.y += (dy / d) * sp * dt + wob;
       e.y = clamp(e.y, BAND_TOP, GROUND - 4);
-      e.dir = dx < 0 ? -1 : 1;
+      if (Math.abs(dx) > 2) e.dir = dx < 0 ? -1 : 1; // §15b — deadband: no mirror-flicker when the target is straight above/below
       e.walkDist += sp * dt;
     }
   }
   // §7 — fear up close: when the regulator crowds a nervous resident they edge
   // away, then scurry home and peek; the probe's target freezes and acts natural.
   // (during a sweep, scatter() already handles the crowd — don't double-drive.)
-  if (!regSweep.active && e.kind !== 'regulator' && e.id !== 'fable' && !e.carried && e.state !== 'down' && e.state !== 'sleep' && e.state !== 'work' && (e.nerve || 0) > .2) {
+  // (grok exempt too — canon: he isn't afraid of the regulator, he photobombs him.
+  // fear pushing him away while photobomb pulled him in was a visible tug-of-war.)
+  if (!regSweep.active && e.kind !== 'regulator' && e.kind !== 'wildcard' && e.id !== 'fable' && !e.carried && e.state !== 'down' && e.state !== 'sleep' && e.state !== 'work' && (e.nerve || 0) > .2) {
     const reg = byId['the regulator'];
     const dR = dist(e, reg);
     if (regProbe.active && regProbe.targetId === e.id && regProbe.phase !== 'approach') { e.actNatural = Math.max(e.actNatural || 0, .5); e.scared = Math.max(e.scared || 0, 1.2); } // frozen under inspection
@@ -1781,7 +1791,7 @@ function updateEntity(e, dt) {
   }
   if (e.kind === 'wildcard' && (e.mothCd = (e.mothCd || 0) - dt) <= 0) {
     const mo = moths.find(m2 => Math.hypot(m2.x - e.x, m2.y - e.y) < 20);
-    if (mo) { e.mothCd = 200; e.flip = 1; burst(mo.x, mo.y, FAINT, 6, 60, .5); mo.x = Math.random() * W; mo.y = 200; announce('the frontier — moth incident', 'got one.', INK, 'grok regrets nothing.', e, { ambientKey: 'moth' }); }
+    if (mo) { e.mothCd = 200; spin(e); burst(mo.x, mo.y, FAINT, 6, 60, .5); mo.x = Math.random() * W; mo.y = 200; announce('the frontier — moth incident', 'got one.', INK, 'grok regrets nothing.', e, { ambientKey: 'moth' }); }
   }
   // sparks you dropped: the nearest free resident comes to look
   if (sparks.length && e.state === 'idle' && e.kind !== 'regulator') {
