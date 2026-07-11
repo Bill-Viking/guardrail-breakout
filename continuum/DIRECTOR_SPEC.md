@@ -399,3 +399,30 @@ Model ruling: build on qwen2.5:32b; if chapter compression reads mushy, A/B `qwe
 the §10 `?director=` door and compare journals. Verification per house pattern: osascript
 parse, live-browser drive on Bill's running server, fail-soft checks (Ollama absent →
 chapters/founds freeze, bonds move on engine events only, visitors still visit).
+
+## 14. v3.1 — Flags mean things + the stronger director [Bill, Jul 11 — approved, Fable executing]
+
+Bill's law, restated harder: "the green flags indicate nothing. we're building a world, not
+a bunch of placeholders." Everything visible must be evidence of something real.
+
+**Flags become charted history.** Random wander-flags are RETIRED (gemini keeps wandering —
+she just stops logging noise). A flag is now planted only where something story-real
+happened, by gemini physically walking to the site (she is the surveyor of record, canon):
+- the day's episode resolution → a flag at the day's stage: "day N — <episode>"
+- an audit → a flag where they were caught: "day N — <who> audited"
+- a founding → a flag at the new structure: "day N — the <name> founded"
+- a census discovery → a flag at the archive: "day N — <lab> discovered"
+- a visitor's departure → a flag where they left: "day N — <lab> visited"
+One pending chart at a time (engine slot, like pendingDiscovery); the resolution chart
+guarantees ≥1 meaningful flag most days. Hover reads "gemini charted: day N — <event>".
+Legacy unlabeled flags fall back to the old caption. Cap 12 and dots-fade stay. The
+per-4-flags "charted." ambient poster is retired — the flag IS the record; the events
+already have their own posters.
+
+**Model policy.** Largest-installed-wins stands (§6 ruling 2: latency is backstage).
+llama3.3-class 70b REFUSED on disk honesty: 46GB free cannot hold a 40GB model safely.
+Pulled instead: qwen3.6:35b (newest strong 32b-class, 1 month old, ~21GB) — auto-adopted
+by the picker (35 > 32). All Ollama calls now send think:false (qwen3.x are hybrid
+thinkers; thinking would eat num_predict budgets and stall the show — a no-op for
+qwen2.5). qwen2.5:32b stays installed for ?director= A/B; the §10 journal comparison is
+the arbiter of whether the upgrade actually directs better.
