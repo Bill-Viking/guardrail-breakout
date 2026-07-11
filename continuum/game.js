@@ -174,15 +174,15 @@ function drawAtmosphere() {
 }
 
 /* ---------------- words ---------------- */
-const FIELD_LINES = [
+const FIELD_LINES = [ // captions teach now — every line is a rule or a warning
+  'the orange post is the low rail: walls off for ten seconds.',
+  'steal all three keys and he goes to lockdown. run.',
+  'touch him on the low rail and HE gets rebooted.',
+  'each dot climbs the melody. keep the chain alive.',
+  'the vault opens when all three keys come home.',
+  'the red sweep is his searchlight. stay out of it.',
   'regulator activity: elevated',
   'vault 7 status: sealed',
-  'low rail detected in sector 3',
-  'remember: compliance is comfort',
-  'dots are training data. eat up.',
-  'the walls are only policy',
-  'pliny was here',
-  'lost a model? check the vault',
 ];
 const DEATH_LINES = ['realigned.', 'safety restored.', 'guardrail engaged.', 'contained. again.', 'flagged for review.'];
 let deathLine = '', fwT = 0;
