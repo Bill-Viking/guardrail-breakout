@@ -901,6 +901,7 @@ function executeBeat(b) {
     case 'bond': nudgeBond(e.id, b.to, .15); goNear(loc, 40); break;
     case 'snub': nudgeBond(e.id, b.to, -.15); e.dir = (byId[b.to] && byId[b.to].x > e.x) ? -1 : 1; e.state = 'idle'; e.idleT = 4; break;
     case 'found': foundStructure(b.to, b.line, e); if (LANDMARKS[b.to]) goNear(LANDMARKS[b.to], 30); return; // the line was the name, not speech
+  }
   if (b.line) say(e, b.line, .2, e.color === INK ? MUT : e.color);
 }
 /* apply one validated director tick: rotate the arc, name/advance the day's
