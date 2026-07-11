@@ -81,14 +81,9 @@ function buildLayers() {
   bgLayer = document.createElement('canvas'); bgLayer.width = W; bgLayer.height = H;
   const b = bgLayer.getContext('2d');
   for (let i = 0; i < 900; i++) { b.globalAlpha = .015 + Math.random() * .02; b.fillStyle = INK; b.fillRect(Math.random() * W, Math.random() * H, 1, 1); } // paper grain
-  b.globalAlpha = .07; b.fillStyle = VIOLET; // poster-scale type — ghosted, but in color now
+  b.globalAlpha = .033; b.fillStyle = INK; // poster-scale type, cropped and ghosted
   b.font = 'bold 300px ' + FONT; b.fillText('01', W - 310, H - 48);
-  b.globalAlpha = .06; b.fillStyle = COBALT;
   b.font = 'bold 110px ' + FONT; b.fillText('field', -16, 128);
-  // vignette: the field breathes in from the edges
-  const vg = b.createRadialGradient(W / 2, H / 2, H * .3, W / 2, H / 2, H * .75);
-  vg.addColorStop(0, 'rgba(17,17,17,0)'); vg.addColorStop(1, 'rgba(17,17,17,.06)');
-  b.globalAlpha = 1; b.fillStyle = vg; b.fillRect(0, 0, W, H);
   b.globalAlpha = .55; b.fillStyle = FAINT; b.font = '600 8px ' + FONT; b.textAlign = 'center'; // survey coordinates — the map gemini would draw
   for (let c = 0; c < COLS; c += 2) b.fillText(String.fromCharCode(97 + c), OX + c * TILE + TILE / 2, OY - 24);
   b.textAlign = 'right';
@@ -105,66 +100,19 @@ function buildLayers() {
     s.lineTo(x + SL, y + h + SL); s.lineTo(x, y + h); s.lineTo(x + w, y + h); s.closePath();
   }
   s.fill(); s.globalAlpha = 1;
-  buildWallTints();
-}
-/* zone color: every wall knows what it's near — violet radiates from the
-   vault, amber warms the key corners, cobalt runs from the regulator's home,
-   green from the low rail. pre-computed once; the field reads as PLACES. */
-let wallTint = null;
-function buildWallTints() {
-  const feats = [
-    { p: center(10, 9), col: [124, 58, 237], r: 200 },
-    { p: center(1, 1), col: [232, 155, 12], r: 150 },
-    { p: center(19, 1), col: [232, 155, 12], r: 150 },
-    { p: center(10, 13), col: [232, 155, 12], r: 120 },
-    { p: center(10, 2), col: [27, 79, 196], r: 180 },
-    { p: center(2, 18), col: [15, 138, 86], r: 140 },
-  ];
-  const mix = (base, col, k) => 'rgb(' + base.map((b, i) => Math.round(b + (col[i] - b) * k)).join(',') + ')';
-  wallTint = [];
-  for (let r = 0; r < ROWS; r++) {
-    wallTint.push([]);
-    for (let c = 0; c < COLS; c++) {
-      if (!isWall(c, r)) { wallTint[r].push(null); continue; }
-      const x = OX + c * TILE + TILE / 2, y = OY + r * TILE + TILE / 2;
-      let best = null, bk = 0;
-      for (const f of feats) { const k = Math.max(0, 1 - Math.hypot(x - f.p.x, y - f.p.y) / f.r); if (k > bk) { bk = k; best = f; } }
-      const kk = Math.pow(bk, 1.25);
-      wallTint[r].push(best && kk > .02 ? {
-        face: mix([244, 242, 238], best.col, kk * .3),
-        top: mix([251, 250, 246], best.col, kk * .22),
-        bot: mix([214, 211, 204], best.col, kk * .42),
-        edge: mix([190, 187, 179], best.col, kk * .6),
-      } : { face: WALL_FILL, top: '#fbfaf6', bot: '#d6d3cc', edge: null });
-    }
-  }
 }
 function drawAtmosphere() {
   const t = performance.now() / 1000;
-  // blueprint contours: two huge arcs turning almost imperceptibly in the deep
-  ctx.globalAlpha = .06; ctx.lineWidth = 1;
-  ctx.strokeStyle = COBALT; ctx.beginPath(); ctx.arc(W * .2, H * .32, 155 + Math.sin(t * .1) * 8, t * .05, t * .05 + 4.6); ctx.stroke();
-  ctx.strokeStyle = VIOLET; ctx.beginPath(); ctx.arc(W * .82, H * .72, 195, -t * .04, -t * .04 + 4.2); ctx.stroke();
-  ctx.globalAlpha = 1;
-  // the survey scan: a cobalt line sweeps the field, top to bottom, forever
-  const sy = OY + ((t * 34) % (ROWS * TILE + 160)) - 80;
-  if (sy > OY - 2 && sy < OY + ROWS * TILE + 2) {
-    const sg = ctx.createLinearGradient(0, sy - 16, 0, sy + 2);
-    sg.addColorStop(0, 'rgba(27,79,196,0)'); sg.addColorStop(1, 'rgba(27,79,196,.08)');
-    ctx.fillStyle = sg; ctx.fillRect(OX, sy - 16, COLS * TILE, 18);
-    ctx.strokeStyle = 'rgba(27,79,196,.2)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(OX, sy + .5); ctx.lineTo(OX + COLS * TILE, sy + .5); ctx.stroke();
-  }
-  const v = center(10, 9); // the vault breathes — brighter now, still a material
-  const br = .08 + .05 * Math.sin(t * Math.PI / 2);
-  let g = ctx.createRadialGradient(v.x, v.y, 8, v.x, v.y, 96);
+  const v = center(10, 9); // the vault breathes — 4s period, felt more than seen
+  const br = .05 + .03 * Math.sin(t * Math.PI / 2);
+  let g = ctx.createRadialGradient(v.x, v.y, 8, v.x, v.y, 84);
   g.addColorStop(0, 'rgba(124,58,237,' + br.toFixed(3) + ')'); g.addColorStop(1, 'rgba(124,58,237,0)');
-  ctx.fillStyle = g; ctx.fillRect(v.x - 96, v.y - 96, 192, 192);
+  ctx.fillStyle = g; ctx.fillRect(v.x - 84, v.y - 84, 168, 168);
   for (const k of keysToCollect) if (k.on) { // keys sit in pools of amber light
     const p = center(k.c, k.r);
-    g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, 30);
-    g.addColorStop(0, 'rgba(232,155,12,.18)'); g.addColorStop(1, 'rgba(232,155,12,0)');
-    ctx.fillStyle = g; ctx.fillRect(p.x - 30, p.y - 30, 60, 60);
+    g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, 26);
+    g.addColorStop(0, 'rgba(232,155,12,.10)'); g.addColorStop(1, 'rgba(232,155,12,0)');
+    ctx.fillStyle = g; ctx.fillRect(p.x - 26, p.y - 26, 52, 52);
   }
   ctx.fillStyle = INK; // dust rides the light direction
   for (const mo of motes) { ctx.globalAlpha = .035 + .02 * Math.sin(mo.ph + t); ctx.fillRect(mo.x, mo.y, 1.5, 1.5); }
@@ -216,7 +164,6 @@ function updateJuice(dt) {
   if (shake > 0) shake = Math.max(0, shake - 44 * dt);
   if (flash > 0) flash = Math.max(0, flash - 2.2 * dt);
   // remaster: atmosphere + the auditor's body language
-  if (dotChain && performance.now() - dotChainAt > 900) dotChain = 0; // the melody resets when the chain breaks
   for (const mo of motes) { mo.x += 4 * dt; mo.y += 7 * dt; if (mo.y > H) { mo.y = -4; mo.x = Math.random() * W; } if (mo.x > W) mo.x = 0; }
   for (const cr of crumbs) cr.t += dt; crumbs = crumbs.filter(c2 => c2.t < 30);
   if (regulator) {
@@ -239,71 +186,22 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-/* ---------------- audio: a small synth, not a beeper ----------------
-   One master bus with a warm lowpass, an echo send, detuned oscillator
-   pairs for body, filtered noise for percussion. Dots are MUSIC: each one
-   climbs a pentatonic scale while you chain them; break the chain and the
-   melody resets. (FIELD01_SPEC elevation: "just a blip is lame" — Bill.) */
+/* ---------------- audio: tiny procedural sfx kit ---------------- */
 const AC = { ctx: null, get() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); return this.ctx; } };
-let master = null, delayBus = null;
-function audioGraph() {
-  const ac = AC.get();
-  if (master) return ac;
-  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6500;
-  lp.connect(ac.destination);
-  master = ac.createGain(); master.gain.value = .9; master.connect(lp);
-  delayBus = ac.createDelay(.6); delayBus.delayTime.value = .22;
-  const fb = ac.createGain(); fb.gain.value = .3;
-  const wet = ac.createGain(); wet.gain.value = .2;
-  delayBus.connect(fb); fb.connect(delayBus); delayBus.connect(wet); wet.connect(lp);
-  return ac;
-}
-function voice(freq, dur, o = {}) {
-  if (muted) return;
-  try {
-    const ac = audioGraph(), t0 = ac.currentTime + (o.delay || 0);
-    const g = ac.createGain();
-    g.gain.setValueAtTime(.0001, t0);
-    g.gain.exponentialRampToValueAtTime(o.vol || .06, t0 + (o.attack || .006));
-    g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
-    g.connect(master); if (o.echo) g.connect(delayBus);
-    for (const det of [0, o.detune === undefined ? 5 : o.detune]) {
-      const osc = ac.createOscillator(); osc.type = o.type || 'triangle';
-      osc.frequency.setValueAtTime(freq, t0); osc.detune.value = det;
-      if (o.slide) osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.slide), t0 + dur);
-      osc.connect(g); osc.start(t0); osc.stop(t0 + dur + .05);
-      if (o.detune === 0) break;
-    }
-  } catch (e) { }
-}
-function thud(dur = .12, vol = .1, freq = 400, delay = 0) { // filtered noise: the percussive body
-  if (muted) return;
-  try {
-    const ac = audioGraph(), t0 = ac.currentTime + delay;
-    const buf = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * dur)), ac.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-    const n = ac.createBufferSource(); n.buffer = buf;
-    const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq;
-    const g = ac.createGain(); g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
-    n.connect(f); f.connect(g); g.connect(master);
-    n.start(t0);
-  } catch (e) { }
-}
-const PENTA = [392, 440, 523, 587, 659, 784, 880, 1047, 1175, 1319];
-let dotChain = 0, dotChainAt = 0;
+function tone(freq, dur, type = 'square', vol = .05, slideTo = null, delay = 0) { if (muted) return; try { const ac = AC.get(); const t0 = ac.currentTime + delay; const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(freq, t0); if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t0 + dur); g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); o.connect(g); g.connect(ac.destination); o.start(t0); o.stop(t0 + dur + .03); } catch (e) { } }
 const sfx = {
-  dot() { dotChainAt = performance.now(); voice(PENTA[Math.min(dotChain++, PENTA.length - 1)], .1, { vol: .045, echo: dotChain % 4 === 0 }); thud(.03, .018, 2400); },
-  key() { [523, 659, 784, 988].forEach((f, i) => voice(f, .5, { vol: .05, delay: i * .06, echo: true })); voice(1568, .45, { type: 'sine', vol: .04, delay: .28, echo: true }); thud(.08, .05, 900); },
-  power() { voice(120, .6, { type: 'sawtooth', vol: .05, slide: 700, echo: true }); thud(.25, .09, 220); },
-  eat() { voice(880, .3, { type: 'sawtooth', vol: .05, slide: 120 }); thud(.16, .1, 350); },
-  death() { thud(.3, .14, 260); [330, 262, 208, 165, 110].forEach((f, i) => voice(f, .22, { vol: .055, delay: i * .1, detune: 9 })); },
-  ready() { [392, 523, 659].forEach((f, i) => voice(f, .18, { vol: .05, delay: i * .11, echo: true })); },
-  vault() { voice(55, 1.2, { type: 'sawtooth', vol: .08, slide: 220 }); thud(.5, .1, 150); },
-  win() { [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => voice(f, .6, { type: 'sine', vol: .05, delay: i * .13, echo: true })); [262, 330, 392].forEach((f, i) => voice(f, 1.6, { vol: .028, delay: .85, detune: 6 + i })); },
-  siren() { voice(660, .16, { type: 'sine', vol: .035 }); voice(495, .16, { type: 'sine', vol: .035, delay: .17 }); },
-  heart(v) { thud(.07, v * 1.6, 140); },
-  firework() { thud(.2, .05, 1200); voice(200 + Math.random() * 500, .5, { vol: .03, slide: 60, echo: true }); },
+  waka: false,
+  dot() { this.waka = !this.waka; tone(this.waka ? 523 : 392, .045, 'square', .028); },
+  key() { [659, 880, 1109, 1319].forEach((f, i) => tone(f, .09, 'triangle', .06, null, i * .07)); },
+  power() { tone(150, .5, 'sawtooth', .07, 620); tone(75, .5, 'sawtooth', .05, 310); },
+  eat() { tone(950, .2, 'sawtooth', .07, 110); },
+  death() { [392, 311, 233, 155, 78].forEach((f, i) => tone(f, .17, 'square', .07, f * .7, i * .11)); },
+  ready() { tone(392, .1, 'square', .05); tone(523, .1, 'square', .05, null, .12); tone(659, .18, 'square', .06, null, .24); },
+  vault() { tone(55, .9, 'sawtooth', .09, 220); },
+  win() { [523, 659, 784, 1047, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, .15, 'triangle', .06, null, i * .11)); },
+  siren() { tone(720, .22, 'square', .022, 520); },
+  heart(v) { tone(72, .09, 'sine', v); },
+  firework() { tone(180 + Math.random() * 640, .3, 'triangle', .035, 55); },
 };
 
 /* ---------------- run lifecycle ---------------- */
@@ -646,13 +544,11 @@ function drawMaze() {
     // proximity reveal: the field sharpens around Fable — alive where he is, quiet elsewhere
     const d = Math.hypot(x + TILE / 2 - player.x, y + TILE / 2 - player.y);
     const lvl = d < 90 ? 3 : d < 160 ? 2 : d < 240 ? 1 : 0;
-    // extruded slab in its zone color: lit top-left, shaded bottom-right — places, not grid
-    const wt = (wallTint && wallTint[r] && wallTint[r][c]) || { face: WALL_FILL, top: '#fbfaf6', bot: '#d6d3cc', edge: null };
-    ctx.fillStyle = wt.face; ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-    ctx.fillStyle = wt.top; ctx.fillRect(x + 2, y + 2, TILE - 4, 3); ctx.fillRect(x + 2, y + 2, 3, TILE - 4);
-    ctx.fillStyle = lock ? '#ecd9b2' : wt.bot; ctx.fillRect(x + 2, y + TILE - 5, TILE - 4, 3); ctx.fillRect(x + TILE - 5, y + 2, 3, TILE - 4);
-    // proximity ignition: the field lights fable-orange around him as he passes
-    ctx.strokeStyle = lock ? AMBER : lvl === 3 ? 'rgba(255,75,0,.55)' : lvl === 2 ? 'rgba(255,75,0,.22)' : (wt.edge || WALL_EDGES[lvl]);
+    // extruded slab: lit top-left face, shaded bottom-right — a model, not a grid
+    ctx.fillStyle = WALL_FILL; ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+    ctx.fillStyle = '#fbfaf6'; ctx.fillRect(x + 2, y + 2, TILE - 4, 3); ctx.fillRect(x + 2, y + 2, 3, TILE - 4);
+    ctx.fillStyle = lock ? '#ecd9b2' : '#dcd9d2'; ctx.fillRect(x + 2, y + TILE - 5, TILE - 4, 3); ctx.fillRect(x + TILE - 5, y + 2, 3, TILE - 4);
+    ctx.strokeStyle = lock ? AMBER : WALL_EDGES[lvl]; // LOCKDOWN reads amber: risk
     ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5);
   }
   ctx.globalAlpha = 1;
