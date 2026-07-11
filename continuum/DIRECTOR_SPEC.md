@@ -426,3 +426,64 @@ by the picker (35 > 32). All Ollama calls now send think:false (qwen3.x are hybr
 thinkers; thinking would eat num_predict budgets and stall the show — a no-op for
 qwen2.5). qwen2.5:32b stays installed for ?director= A/B; the §10 journal comparison is
 the arbiter of whether the upgrade actually directs better.
+
+## 15. v4.0 — The foundation: a model broker + the visible story [Bill's direction, Jul 11 — spec'd for build]
+
+Bill's verdict and mandate: "it seems stale... characters mindlessly wandering... no real
+story apparent — they go to the archive and do what?" AND "terrarium should be able to run
+on cloud APIs such as anthropic where more powerful models are available; I want the
+world's output to grow richer — but first we lay a strong foundation." Two foundation
+pieces; neither is a feature, both are load-bearing.
+
+### 15a. The model broker (cloud-ready, key-safe, budget-capped)
+
+- **One choke point in world.js:** `llmCall(role, {system, prompt, options, format})` —
+  every model call (director, judge, chapter, research, storyteller, gloss, talk-if-built)
+  goes through it. It POSTs to `/llm` on server.py; if /llm is absent (Pages, file://,
+  plain http.server) it falls back to direct local Ollama exactly as today — zero
+  regression, fail-soft law holds.
+- **server.py POST /llm:** routes by gitignored `model_config.json`:
+  `{"provider":"ollama"|"anthropic", "model":"...", "anthropic_key":"...",
+  "daily_budget_usd": 2.0, "roles":{"director":"cloud","judge":"local","gloss":"local",...}}`.
+  No config → server-side proxy to localhost:11434 (today's behavior). Anthropic path:
+  /v1/messages, temperature+max_tokens mapped from options, extended thinking OFF for
+  contract JSON. The upstream set is CLOSED: localhost:11434 and api.anthropic.com only —
+  this is a broker, never a generic proxy. The §9 relay, /read, /search: untouched.
+- **Budget law:** the server meters usage per calendar day (tokens → est. USD, persisted
+  in a local gitignored file); over budget → 402 → client falls back to local silently and
+  the footer says so. A 24/7 world must be incapable of a surprise bill. Director-only
+  cloud routing is the default posture (~480 ticks/day is real money; glosses are not).
+- **Transparency + evidence:** /llm responses carry {provider, model}; the footer
+  storyteller line names it (e.g. "story: claude-sonnet-5 · via api"); the journal's
+  per-entry model field records provider/model (digest: API version string or
+  "unavailable"). Same contract + same world + different brains = the §10 A/B instrument
+  at frontier scale — the journals are the judge of whether cloud directing is worth it.
+- **Key law:** the browser NEVER sees the key. Keys live in gitignored config, like
+  search_key.json. Bill pastes once.
+
+### 15b. The visible story (cures "stale"; model-agnostic)
+
+- **The playbill:** a persistent, quiet story panel — click the pinned episode line (or a
+  small "today's story" footer link) → the day's beats so far, act by act, as readable
+  lines: "act ii — openai inspects the tower: 'checking the damage.'" Rendered from
+  today's journal entries (beats_kept) + the resolution; updates as beats execute. The
+  story becomes readable at ANY moment, not only if you catch a 2.6s bubble. Swiss,
+  hairline, footer-styled like wiredetail.
+- **Scenes, not teleports:** when one tick's beats involve 2+ residents at a shared
+  target, the engine stages a scene: participants walk, WAIT for each other, face each
+  other, lines fire in sequence (not on independent timers), and the scene closes with
+  one chronicle line. The beats layer is already exempt from the walker cap — pacing law
+  holds.
+- **Arrivals mean the place:** a beat arrival triggers the landmark's gesture — archive:
+  pull a book; tower: look up, one hammer tap; bench: crouch at the works; pond: sit a
+  moment; vault: touch the frame. Small pre-drawn poses, one per landmark. THIS is the
+  answer to "they go to the archive and do what."
+- Explicitly deferred to §16 (after 15a+15b prove out): a richer director contract
+  (multi-line dialogue scenes, multi-day arc goals) — richer output needs the broker's
+  stronger brains AND the playbill's surface to live on; contract growth without both is
+  waste.
+
+Build order ruling requested from Bill: 15b first (fixes what today feels like, works on
+qwen3.6 now) then 15a (enables the future), or 15a first. Fable's recommendation: **15b
+first** — the stale feeling is the emergency; the broker unblocks nothing user-visible
+until an Anthropic key + budget decision exist.
