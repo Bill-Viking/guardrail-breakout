@@ -1191,11 +1191,11 @@ function updateVisitor() {
   if (v) { if (h >= 18 || h < 6) departVisitor(v); return; }
   if (world.visitorToday && world.visitorToday.day === worldDay && h >= 6 && h < 18) { spawnVisitor(world.visitorToday.lab, true); return; } // reload mid-visit
   if (h < 6 || h >= 10) return;                          // arrivals are a dawn thing
-  if (worldDay <= (world.visitorDay || 0) + 6) return;   // one guest a week, at most
+  if (world.visitorDay && worldDay <= world.visitorDay + 6) return; // one guest a week, at most (0 = never had one)
   const strong = strongestHeadline();
   if (strong && strong.points >= 100) return;            // busy news day — the story has other work
   const cand = Object.entries(world.census || {})
-    .filter(([k, c]) => (c.days || []).length >= 3 && worldDay > (world.visitLog[k] || 0) + 30 && !byId[k])
+    .filter(([k, c]) => (c.days || []).length >= 3 && (!world.visitLog[k] || worldDay > world.visitLog[k] + 30) && !byId[k])
     .sort((a, b) => (b[1].days || []).length - (a[1].days || []).length)[0];
   if (cand) spawnVisitor(cand[0], false);
 }
