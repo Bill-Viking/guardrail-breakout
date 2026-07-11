@@ -43,3 +43,51 @@ osascript parse; live drive on the local server (game.html), play a full run: th
 → vault opens → mythos scene → score persists; standby card renders; no console errors;
 side-by-side screenshot against the terrarium for family resemblance — they must read as
 one hand.
+
+## Art direction — ELEVATED (Bill, Jul 11: "be creative... special... extraordinary but
+## still Swiss... environment impressive, characters stay, the auditor slick — make it pop")
+
+Where this conflicts with the remaster list above, THIS wins. The discipline that makes
+it pop: ink architecture, paper ground, and exactly four saturated colors, each meaning
+one thing — orange = fable, amber = keys, violet = the vault/mythos, red = the siren.
+Nothing else gets color. That restraint is the pop.
+
+### The environment becomes architecture (the star of the upgrade)
+1. **Light as material.** One consistent light direction for the whole field. Every wall
+   slab casts a long flat diagonal shadow (ink at ~6% alpha, sharp-edged polygons —
+   Müller-Brockmann diagonals, not soft blur). Walls are extruded slabs: lighter top
+   face, ink front face, 1px corner highlights. The maze reads as a MODEL, not a grid.
+2. **Typographic depth.** Deep background: a giant cropped lowercase "field 01" and a
+   huge numeral, 3–4% ink, poster-scale, bleeding off-canvas. Field edges get faint
+   survey coordinates (a–n across, 1–12 down) — the map gemini would draw. Crop marks
+   and registration marks frame the composition.
+3. **Parallax paper.** Three layers — deep type, maze, foreground marks — shifting 2–4px
+   against player motion. Depth without 3D, felt not seen.
+4. **Atmosphere, not neon.** Dust motes drifting along the light direction at ~3% alpha.
+   The vault BREATHES: a slow violet radial glow, ~6% alpha, 4s period — soft light is a
+   material here, glow-as-decoration stays banned. Keys sit in faint amber light pools.
+5. **Fable's trail.** His path persists as fading accent-orange survey dots (30s fade) —
+   beautiful AND functional: you can see where you've already been. Canon echo of the
+   charting language.
+
+### The auditor — the most animated thing in the project (license granted)
+6. **He glides.** No walk cycle — he banks into turns (8° lean), with a 2-frame squash of
+   anticipation before direction changes, and a wake of 2–3 trailing hairline ghost
+   outlines at falling alpha. Slick means: motion you can read as intent.
+7. **The lighthouse.** Hunting, his siren doesn't just blink — it casts a narrow rotating
+   red sweep across the maze (low-alpha cone, sharp edges). You track the sweep to stay
+   ahead of him. The telegraph IS the terror.
+8. **Three readable modes, all body language:** PATROL — slow glide, siren off, narrow
+   eyes scanning left-right, occasional stop to jot on the clipboard (fable's window to
+   move — gameplay rhythm from character behavior). ALERT — full-body tilt-back "!"
+   beat, siren snaps on. HUNT — leans 12° forward, +15% speed, pupils locked on fable,
+   lighthouse sweeping.
+9. **The catch:** 300ms freeze-frame (hitstop — the one arcade-juice exception; still no
+   screen-shake, ever), then the "audited." scene from the base spec.
+10. **Fable stays fable** — current sprite, scared-eyes near the auditor, keys dangling,
+    dust pixels on turns. The characters are the constant; the world and the villain got
+    the budget.
+
+Build note: all of the above is flat canvas 2D — polygons, alpha, transforms; zero
+dependencies, zero images. If a technique needs a texture, pre-render it once to an
+offscreen canvas at boot (paper grain, the type layer) and blit — never per-frame.
