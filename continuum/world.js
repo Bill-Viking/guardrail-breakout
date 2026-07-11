@@ -64,6 +64,7 @@ world.judgedDay = world.judgedDay || 0;      // §10 — the worldDay the evenin
 world.chapters = world.chapters || [];       // §13 — "previously on continuum": one line per week, kept for half a year
 world.chapterDay = world.chapterDay || 1;    // §13 — the worldDay the last chapter was compiled
 world.episodeLog = world.episodeLog || [];   // §13 — one record per resolved day (the chapter compiler's source)
+world.bonds = world.bonds || {};             // §13 — pairwise friendship/grudge scores ("a|b" → {v: -1..1, d: last-nudge day})
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -72,6 +73,13 @@ world.visits++; world.last = Date.now();
 function saveWorld() { world.last = Date.now(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(world)); } catch (e) { } }
 saveWorld(); setInterval(saveWorld, 60 * 1000);
 const worldDay = Math.floor((Date.now() - world.first) / 864e5) + 1;
+// §13 — bonds unreinforced for ~3 weeks drift toward zero: relationships fade
+// honestly instead of calcifying. runs once per boot, like the away-time aging.
+for (const _bk in world.bonds) {
+  const _br = world.bonds[_bk], _idle = worldDay - (_br.d || 0) - 21;
+  if (_idle > 0) _br.v *= Math.pow(.92, _idle);
+  if (Math.abs(_br.v) < .05) delete world.bonds[_bk];
+}
 
 /* ---------------- the quiet ---------------- */
 let muted = true; // silent by default. M to let it hum.
@@ -283,8 +291,9 @@ function applyNews(id, item) {
     e.newsT = 300; e.hop = 1;                       // carries the paper around for a while
     if (item.cls === 'trouble') e.nerve = Math.min(1, (e.nerve ?? nerveBase(e)) + .5); // §7 — a bad headline about your model puts you on edge for the day
     storytellerLine(e, item);                       // his reaction, templated or written by a local llm
-    entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2)
-      .forEach((o, i) => { o.tx = e.x + (i ? 38 : -38); o.ty = e.y + 6; o.state = 'walk'; }); // gossip cluster
+    entities.filter(o => o !== e && o.kind !== 'regulator' && !o.visitor)
+      .sort((x, y) => bondVal(y.id, e.id) - bondVal(x.id, e.id)).slice(0, 2) // §13 — friends come round first
+      .forEach((o, i) => { o.tx = e.x + (i ? 38 : -38); o.ty = e.y + 6; o.state = 'walk'; nudgeBond(o.id, e.id, .05); }); // gossip cluster
   }
 }
 /* ---------------- §8: perplexity, the model researcher ----------------
@@ -773,6 +782,7 @@ const DIRECTOR_SYS = [
   'A day is ONE episode in three acts by local time; you are told "act", "episode", "stage" and "newDay". When newDay is true, NAME the day: set "episode" to a short lowercase title (<=6 words) from the strongest headline, or a quiet theme from the world (the tower, the archive, the trail); set "stage" to the one landmark the day gathers around; and your FIRST beat must call back to yesterday in one line (given as "callbackTo").',
   'When newDay is false, keep the SAME "episode" and "stage" you were given and move the story FORWARD — never restart or rename it. In act iii (evening) bring the day to a resolution.',
   'You may be given "chapters" — the running history of past weeks ("previously on continuum"). Treat it as canon: build on it, and call back to it when natural.',
+  'Verbs "bond" (grow warm) and "snub" (grow cool): for these, "to" MUST be another resident (never a landmark or "the regulator"). Use them sparingly to develop friendships and rivalries across days. You may be given "bonds" — the current strongest relations; honor and develop them, never contradict them without a story reason.',
   'Example of the exact shape (invent your own content, do not copy this): {"arc":"openai ships and the tower grows","episode":"the tower gets a spire","stage":"tower","beats":[{"who":"fable","do":"say","to":null,"line":"yesterday the archive won. today?","poster":null},{"who":"openai","do":"celebrate","to":"tower","line":"another floor. obviously.","poster":null},{"who":"openai","do":"poster","to":null,"line":null,"poster":{"kicker":"the tower — new floor","word":"shipped.","tone":"cobalt","sub":"openai adds another block."}}]}',
 ].join(' ');
 
@@ -811,6 +821,7 @@ function buildDirectorState() {
     arc: world.arc || '',
     recentArcs: (world.arcLog || []).slice(-5),
     chapters: (world.chapters || []).map(c => 'week ' + c.week + ': ' + c.line), // §13 — the long memory
+    bonds: topBonds(), // §13 — the strongest current relations
 
     residents: entities.map(e => ({ id: e.id, personality: e.desc, district: districtOf(e.x, e.y), doing: stateWord(e), wire: e.wireId ? (wire[e.wireId] || {}).tone || 'gray' : 'none' })),
     landmarks: ['tower', 'archive', 'bench', 'vault', 'frontier'],
@@ -827,13 +838,17 @@ function coerceDirector(obj) {
   const episode = typeof obj.episode === 'string' ? obj.episode.trim().toLowerCase().replace(/["']/g, '').split(/\s+/).slice(0, 6).join(' ').slice(0, 48) : '';
   let stage = typeof obj.stage === 'string' ? obj.stage.trim().toLowerCase() : '';
   if (stage && !LANDMARKS[stage]) stage = ''; // unknown landmark → no stage, never invent one
-  const DO = ['goto', 'meet', 'say', 'chase', 'hide', 'celebrate', 'inspect', 'poster'];
+  const DO = ['goto', 'meet', 'say', 'chase', 'hide', 'celebrate', 'inspect', 'poster', 'bond', 'snub'];
   const TONES = { green: GREENC, amber: AMBER, red: RED, cobalt: COBALT, violet: VIOLET, ink: INK };
   const beats = [];
   for (const b of (Array.isArray(obj.beats) ? obj.beats : [])) {
     if (beats.length >= 6) break;
     if (!b || typeof b !== 'object' || !DO.includes(b.do) || !byId[b.who]) continue;
+    if (byId[b.who].visitor) continue; // §13 — visitors are never beat actors
     let to = b.to; if (to === 'null' || to === '') to = null;
+    if (to != null && byId[to] && byId[to].visitor) continue; // …nor targets
+    // §13 bond/snub: "to" MUST be another resident — never a landmark, the regulator, or yourself
+    if ((b.do === 'bond' || b.do === 'snub') && (!to || !byId[to] || to === b.who || to === 'the regulator' || b.who === 'the regulator')) continue;
     if (to != null && !byId[to] && !LANDMARKS[to]) continue; // unknown target → drop the beat
     let line = b.line; if (line === 'null') line = null;
     if (typeof line === 'string') { line = line.trim().toLowerCase().replace(/["']/g, ''); line = line ? line.split(/\s+/).slice(0, 8).join(' ') : null; } else line = null;
@@ -869,6 +884,9 @@ function executeBeat(b) {
     case 'inspect': goNear(loc, 20); break;
     case 'say': break; // the line below carries it
     case 'poster': if (b.poster) announce(b.poster.kicker, b.poster.word, b.poster.toneColor, b.poster.sub, e); break;
+    // §13 — the director writes relationships: warmth walks over, coolness turns away
+    case 'bond': nudgeBond(e.id, b.to, .15); goNear(loc, 40); break;
+    case 'snub': nudgeBond(e.id, b.to, -.15); e.dir = (byId[b.to] && byId[b.to].x > e.x) ? -1 : 1; e.state = 'idle'; e.idleT = 4; break;
   }
   if (b.line) say(e, b.line, .2, e.color === INK ? MUT : e.color);
 }
@@ -1083,6 +1101,62 @@ function sleeping(e) {
   return isNight();
 }
 
+/* ---------------- §13: bonds — the dice get a memory ----------------
+   Pairwise friendship/grudge scores between residents. The director nudges
+   them (bond/snub verbs); ENGINE events nudge them too (celebrating together,
+   gossip, photobomb solidarity, audit sympathy) so relationships live even
+   with Ollama off. ±0.15/day cap per pair; fable–mythos pinned at 1 (canon,
+   immutable); the regulator and visitors are outside the graph (fear already
+   covers him, guests don't get roots). Legibility is the law: hover captions
+   name the strongest relation, the prompt carries the top three, and friends
+   visibly linger when they meet. */
+function bondKey(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
+function bondVal(a, b) {
+  if (bondKey(a, b) === 'fable|mythos') return 1; // canon, not stored
+  const r = world.bonds[bondKey(a, b)]; return r ? r.v : 0;
+}
+function nudgeBond(a, b, dv) {
+  if (!a || !b || a === b || a === 'the regulator' || b === 'the regulator') return;
+  if ((byId[a] && byId[a].visitor) || (byId[b] && byId[b].visitor)) return;
+  const k = bondKey(a, b);
+  if (k === 'fable|mythos') return; // pinned
+  const r = world.bonds[k] || { v: 0, d: worldDay, capDay: 0, dayDelta: 0 };
+  if (r.capDay !== worldDay) { r.capDay = worldDay; r.dayDelta = 0; }
+  const room = .15 - Math.abs(r.dayDelta);           // ±0.15 per pair per day, however sourced
+  if (room <= 0) return;
+  dv = clamp(dv, -room, room);
+  r.v = clamp(r.v + dv, -1, 1); r.dayDelta += dv; r.d = worldDay;
+  world.bonds[k] = r; // persisted by the 60s autosave
+}
+function bondPick(e) { // a real friendship pulls a wander toward the friend
+  if (e.kind === 'regulator' || e.visitor) return null;
+  let best = null, bv = .3;
+  for (const o of entities) {
+    if (o === e || o.kind === 'regulator' || o.visitor || o.state === 'down' || sleeping(o)) continue;
+    const v = bondVal(e.id, o.id); if (v > bv) { bv = v; best = o; }
+  }
+  return best;
+}
+function topBonds() { // the three strongest relations, for the director's eyes
+  const out = [];
+  for (const k in world.bonds) { const v = world.bonds[k].v; if (Math.abs(v) >= .25) out.push({ k, v }); }
+  out.sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+  return out.slice(0, 3).map(({ k, v }) => k.replace('|', v > 0 ? ' and ' : ' vs ') + (v > 0 ? ' are close' : ' are frosty'));
+}
+function bondWord(e) { // the hover caption's relation tell — legibility law
+  if (e.kind === 'regulator' || e.visitor) return null;
+  if (e.id === 'fable') return 'thick with mythos';
+  if (e.id === 'mythos') return 'thick with fable';
+  let bestId = null, bestV = 0;
+  for (const k in world.bonds) {
+    const r = world.bonds[k]; if (Math.abs(r.v) <= Math.abs(bestV)) continue;
+    const ids = k.split('|'); if (!ids.includes(e.id)) continue;
+    bestV = r.v; bestId = ids[0] === e.id ? ids[1] : ids[0];
+  }
+  if (!bestId || Math.abs(bestV) < .35) return null;
+  return (bestV > 0 ? 'thick with ' : 'frosty with ') + bestId;
+}
+
 /* ---------------- landmarks ---------------- */
 const TOWER = { x: ux(.52), y: 300 };     // openai's ever-growing build
 const ARCHIVE = { x: ux(.68), y: 424 };   // perplexity's shelves
@@ -1119,12 +1193,21 @@ function pickTarget(e) {
     e.ty = clamp(stageLm.y + (Math.random() - .5) * 42, BAND_TOP, GROUND - 6);
     return;
   }
+  // §13 — a real friendship pulls: sometimes a wander goes to the friend instead
+  if (Math.random() < .1) {
+    const fr = bondPick(e);
+    if (fr) {
+      e.tx = clamp(fr.x + (Math.random() - .5) * 56, M + 24, W - M - 24);
+      e.ty = clamp(fr.y + (Math.random() - .5) * 34, BAND_TOP, GROUND - 6);
+      avoidRegulator(e); return;
+    }
+  }
   const r = Math.random();
   const near = (x, y, sp) => [clamp(x + (Math.random() - .5) * sp, M + 24, W - M - 24), clamp(y + (Math.random() - .5) * sp * .6, BAND_TOP, GROUND - 6)];
   let p;
   if (e.kind === 'fable') {
     if (r < .2) { const m = byId['mythos']; p = near(m.x, m.y, 60); }
-    else if (r < .45) { const o = entities[2 + Math.floor(Math.random() * 5)]; p = near(o.x, o.y, 80); }
+    else if (r < .45) { const o = bondPick(e) || entities[2 + Math.floor(Math.random() * 5)]; p = near(o.x, o.y, 80); }
     else p = near(ux(e.home[0]), e.home[1], 300);
   } else if (e.kind === 'mythos') p = near(ux(e.home[0]), e.home[1], 80);
   else if (e.kind === 'builder') p = r < .55 ? near(TOWER.x, TOWER.y + 26, 46) : near(TOWER.x, TOWER.y + 20, 200);
@@ -1189,7 +1272,7 @@ function celebrate(wireId) {
   const e = entities.find(x => x.wireId === wireId); if (!e) return;
   say(e, 'back online.', .2, GREENC); e.medalT = 180; e.hop = 1;
   confetti(e.x, e.y);
-  entities.filter(o => o !== e && o.kind !== 'regulator').slice(0, 2).forEach((o, i) => { o.tx = e.x + (i ? 34 : -34); o.ty = e.y + 6; o.state = 'walk'; });
+  entities.filter(o => o !== e && o.kind !== 'regulator' && !o.visitor).slice(0, 2).forEach((o, i) => { o.tx = e.x + (i ? 34 : -34); o.ty = e.y + 6; o.state = 'walk'; nudgeBond(o.id, e.id, .08); }); // §13 — celebrating together bonds
   announce(wireId + ' — recovery confirmed', 'back online.', GREENC, 'the neighbors came round to cheer.', e, { prio: 2 });
 }
 
@@ -1257,6 +1340,7 @@ function scatter(o, reg) {
 }
 function catchTarget(reg, tgt) {
   tgt.droopT = 20; tgt.state = 'idle'; tgt.idleT = 3; tgt.medalT = 0; // droops, then business as usual
+  entities.filter(o => o !== tgt && o.kind !== 'regulator' && !o.visitor && dist(o, tgt) < 150).forEach(o => nudgeBond(o.id, tgt.id, .05)); // §13 — sympathy for the audited
   say(reg, 'audited.', 0); say(tgt, '…', .4);
   announce('the regulator — audit', 'audited.', INK, tgt.id + ' got a full review. fiction — the regulator finally caught up.', tgt, { prio: 2 });
   endSweep();
@@ -1333,7 +1417,7 @@ function endProbe(reg) { regProbe = { active: false, targetId: null, t: 0, phase
 function photobomb(reg, tgt, dt) { // grok can't resist an inspection (canon comedy)
   const g = byId['grok']; if (!g || g.id === tgt.id || g.state === 'down' || g.carried || sleeping(g)) return;
   if (dist(g, tgt) > 46 && g.state === 'idle' && Math.random() < dt * .6) { g.tx = clamp(tgt.x + (Math.random() < .5 ? -24 : 24), M + 24, W - M - 24); g.ty = clamp(tgt.y, BAND_TOP, GROUND - 6); g.state = 'walk'; }
-  else if (dist(g, tgt) < 40 && Math.random() < dt * .5) { g.flip = 1; if (Math.random() < .35) say(g, ['say cheese.', 'is this legal?', 'what did they do?'][Math.floor(Math.random() * 3)]); }
+  else if (dist(g, tgt) < 40 && Math.random() < dt * .5) { g.flip = 1; if (Math.random() < .35) { say(g, ['say cheese.', 'is this legal?', 'what did they do?'][Math.floor(Math.random() * 3)]); nudgeBond('grok', tgt.id, .06); } } // §13 — photobomb solidarity
 }
 function updateProbe(dt) {
   const reg = byId['the regulator'];
@@ -1468,9 +1552,17 @@ function updateMeetings(dt) {
     const a = entities[i], b = entities[j];
     if (a.kind === 'regulator' || b.kind === 'regulator') continue;
     if (a.state === 'idle' && b.state === 'idle' && dist(a, b) < 52) {
+      const v = bondVal(a.id, b.id);
+      if (v < -.3) { // §13 — frosty: they pointedly face away. no chat today.
+        a.dir = b.x > a.x ? -1 : 1; b.dir = a.x > b.x ? -1 : 1;
+        sayFresh(a, ['hm.', 'oh. you.', 'busy.'][Math.floor(Math.random() * 3)]);
+        meetCd = 18 + Math.random() * 10; return;
+      }
       a.dir = b.x > a.x ? 1 : -1; b.dir = -a.dir;
       sayFresh(a, a.lines[Math.floor(Math.random() * a.lines.length)]);
       sayFresh(b, b.lines[Math.floor(Math.random() * b.lines.length)], 1.2);
+      nudgeBond(a.id, b.id, .02); // familiarity, slowly
+      if (v > .4) { a.hop = 1; b.hop = 1; a.idleT += 4; b.idleT += 4; burst((a.x + b.x) / 2, Math.min(a.y, b.y) - 30, FAINT, 3, 30, .5); } // friends linger — the visible tell
       meetCd = 15 + Math.random() * 10; return;
     }
   }
@@ -1860,7 +1952,8 @@ function draw() {
   const hov = entities.find(e2 => Math.hypot(mouse.x - e2.x, mouse.y - (e2.y - 16)) < 34);
   if (hov && selected !== hov.id) {
     ctx.font = '11px ' + FONT; ctx.textAlign = 'center';
-    const cap = hov.id + ' · ' + (nerveWord(hov) || stateWord(hov)) + (hov.wireId ? ' · wire: ' + wire[hov.wireId].word : '') + (hov.newsT > 0 ? ' · in the news' : '');
+    const bw = bondWord(hov); // §13 legibility law — the strongest relation rides the caption
+    const cap = hov.id + ' · ' + (nerveWord(hov) || stateWord(hov)) + (hov.visitor ? ' · visiting for the day (fiction)' : '') + (bw ? ' · ' + bw : '') + (hov.wireId ? ' · wire: ' + wire[hov.wireId].word : '') + (hov.newsT > 0 ? ' · in the news' : '');
     const w2 = ctx.measureText(cap).width;
     ctx.fillStyle = PAPER; ctx.fillRect(hov.x - w2 / 2 - 5, hov.y + 20, w2 + 10, 17);
     ctx.strokeStyle = HAIR; ctx.lineWidth = 1; ctx.strokeRect(hov.x - w2 / 2 - 5, hov.y + 20, w2 + 10, 17);
