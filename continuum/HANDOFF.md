@@ -54,8 +54,8 @@ SHIPPED and pushed to github.com/Bill-Viking/continuum-arcade (main):
   posters once/day — "self-evolving, not looping" is Bill's stated law) + brave `/search`
   door in server.py (key-gated via gitignored `search_key.json`, fail-soft to wikipedia+hn)
   + from-memory fallback with explicit warning. Dropped: weather special-case (Bill).
-  PENDING Bill: paste a Brave key (brave.com/search/api, free tier) into
-  `continuum/search_key.json` as `{"brave":"<key>"}` — no restart needed; review §13
+  PENDING Bill: get a FREE Tavily key (app.tavily.com — 1000 searches/mo, no card; brave now charges $5/mo) and paste into
+  `continuum/search_key.json` as `{"tavily":"<key>"}` (brave keys still work too) — no restart needed; review §13
   (self-evolving terrarium: bonds, weekly foundations, chapter memory, census visitors) in
   DIRECTOR_SPEC.md; re-confirm or kill talk-to-residents (§12, spec'd, unbuilt).
   **Bigger thread from tonight: Bill is questioning the terrarium's purpose** ("drifting on
