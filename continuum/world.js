@@ -70,6 +70,7 @@ world.foundedDay = world.foundedDay || 0;    // §13 — the worldDay of the las
 world.visitLog = world.visitLog || {};       // §13 — census lab → worldDay of its last visit
 world.visitorDay = world.visitorDay || 0;    // §13 — the worldDay any visitor last came (one a week, at most)
 world.visitorToday = world.visitorToday || null; // §13 — {lab, day}: today's guest, so a reload doesn't lose them
+world.playbill = world.playbill || [];       // §15b — the day's performed beats, readable at any moment (cap 40, reset each day)
 // time passed while the tab was closed — the world kept going
 const awayH = clamp((Date.now() - world.last) / 36e5, 0, 24 * 14);
 world.tower = clamp(world.tower + Math.floor(awayH / 4), 0, 24);
@@ -906,9 +907,59 @@ function parseLoose(s) { // tolerate a stray wrapper; truncated/unbalanced json 
   return null;
 }
 function locOf(to) { if (!to) return null; if (byId[to]) return { x: byId[to].x, y: byId[to].y }; return LANDMARKS[to] || null; }
+/* §15b — the playbill: every performed beat becomes a readable line of the
+   day's script. violet door in the footer; resets with the episode. */
+function playbillAdd(en) {
+  world.playbill = (world.playbill || []).concat(en).slice(-40);
+  saveWorld(); renderPlaybill(); updateStoryLink();
+}
+function beatSentence(en) {
+  const tgt = en.to ? (LANDMARKS[en.to] ? 'the ' + en.to : en.to) : '';
+  let s;
+  switch (en.do) {
+    case 'curtain': return 'curtain — “' + (en.line || '') + '”';
+    case 'poster': return en.who + ' raises a poster — “' + (en.poster || '') + '”';
+    case 'found': return en.who + ' founds “' + (en.line || '') + '” (' + en.to + ')';
+    case 'goto': s = en.who + (tgt ? ' heads to ' + tgt : ' heads out'); break;
+    case 'meet': s = en.who + (tgt ? ' meets ' + tgt : ' looks for company'); break;
+    case 'say': s = en.who; break;
+    case 'chase': s = en.who + (tgt ? ' chases ' + tgt : ' gives chase'); break;
+    case 'hide': s = en.who + ' hides'; break;
+    case 'celebrate': s = en.who + ' celebrates' + (tgt ? ' at ' + tgt : ''); break;
+    case 'inspect': s = en.who + ' inspects' + (tgt ? ' ' + tgt : ''); break;
+    case 'bond': s = en.who + ' warms to ' + tgt; break;
+    case 'snub': s = en.who + ' snubs ' + tgt; break;
+    default: s = en.who + ' ' + en.do;
+  }
+  return s + (en.line ? ' — “' + en.line + '”' : '');
+}
+function fillPlaybill(el) {
+  const pb = world.playbill || [];
+  let h = '<span class="x" id="playbillclose">×</span><b>today — ' + esc(world.episode || 'no episode yet') + '</b><br>';
+  if (!pb.length) h += '<span style="color:#C9C9C9">nothing staged yet — beats appear here as they are performed.</span><br>';
+  const anames = { i: 'act i — setup', ii: 'act ii — development', iii: 'act iii — resolution' };
+  let lastAct = '';
+  for (const en of pb) {
+    if (en.a !== lastAct) { lastAct = en.a; h += '<span class="act">' + (anames[en.a] || 'act ' + en.a) + '</span><br>'; }
+    h += esc(beatSentence(en)) + '<br>';
+  }
+  h += '<span style="color:#C9C9C9">the playbill is theater — the fiction layer performing. facts live in the linked panels.</span>';
+  el.innerHTML = h;
+  const x = document.getElementById('playbillclose');
+  if (x) x.addEventListener('click', () => { el.style.display = 'none'; });
+}
+function renderPlaybill() { const el = document.getElementById('playbill'); if (el && el.style.display === 'block') fillPlaybill(el); }
+function updateStoryLink() { const el = document.getElementById('storyline'); if (el) el.style.display = world.episode ? 'block' : 'none'; }
+/* §15b — arrivals mean the place: a beat's landmark gets its gesture */
+const GESTURE_OF = { archive: 'book', tower: 'brow', bench: 'crouch', vault: 'touch', frontier: 'brow', garden: 'crouch', signpost: 'brow', bench2: 'crouch', vane: 'brow', board: 'brow', pond: 'sit' };
+function gesture(e, at) {
+  if (at && LANDMARKS[at] && GESTURE_OF[at]) { e.gestureKind = GESTURE_OF[at]; e.gestureT = 1.8; }
+  else e.hop = Math.max(e.hop, .6); // meeting a resident: a small acknowledging bounce
+}
 function executeBeat(b) {
   const e = byId[b.who]; if (!e || e.state === 'down') return; // never yank a resident who's down
   const loc = locOf(b.to);
+  playbillAdd({ a: actInfo().roman, who: b.who, do: b.do, to: b.to, line: b.line, poster: b.poster ? b.poster.word : null }); // §15b — the script records the performance
   const goNear = (p, spread) => { if (!p) return; e.tx = clamp(p.x + (Math.random() - .5) * spread, M + 24, W - M - 24); e.ty = clamp(p.y + (Math.random() - .5) * spread * .6, BAND_TOP, GROUND - 6); e.state = 'walk'; };
   switch (b.do) {
     case 'goto': goNear(loc, 40); break;
@@ -924,7 +975,14 @@ function executeBeat(b) {
     case 'snub': nudgeBond(e.id, b.to, -.15); e.dir = (byId[b.to] && byId[b.to].x > e.x) ? -1 : 1; e.state = 'idle'; e.idleT = 4; break;
     case 'found': foundStructure(b.to, b.line, e); if (LANDMARKS[b.to]) goNear(LANDMARKS[b.to], 30); return; // the line was the name, not speech
   }
-  if (b.line) say(e, b.line, .2, e.color === INK ? MUT : e.color);
+  // §15b — scenes happen at places: a targeted beat's line is delivered on ARRIVAL
+  // (with the landmark's gesture), not en route. untargeted lines fire where they stand.
+  if (b.line) {
+    if (loc && ['goto', 'meet', 'chase', 'inspect', 'celebrate', 'bond'].includes(b.do)) {
+      e.beatLine = { text: b.line, color: e.color === INK ? MUT : e.color, at: b.to };
+      e.beatLineT = 45; // stranded-delivery fallback: say it wherever you ended up
+    } else say(e, b.line, .2, e.color === INK ? MUT : e.color);
+  }
 }
 /* apply one validated director tick: rotate the arc, name/advance the day's
    episode, stage its cast, perform the beats, and close the evening on a
@@ -941,6 +999,7 @@ function applyDirectorResult(ok) {
   const newDay = world.episodeDay !== worldDay;
   const headlineChanged = !newDay && !!strong && world.episodeHeadline !== strongKey && actInfo().i < 3;
   if (newDay || !world.episode || headlineChanged) {
+    if (newDay) world.playbill = []; // §15b — a new day, a fresh script
     world.episode = ok.episode || quietTheme();
     world.episodeStage = ok.stage || deriveStage(strong) || world.episodeStage || null;
     world.episodeHeadline = strongKey;
@@ -971,6 +1030,7 @@ function applyDirectorResult(ok) {
     announce('day ' + worldDay + ' — ' + world.episode,
       p ? p.word : 'curtain.', p ? p.toneColor : VIOLET,
       (p && p.sub) ? p.sub : (world.arc || 'that was today.').slice(0, 70), null);
+    playbillAdd({ a: 'iii', who: '', do: 'curtain', to: null, line: p ? p.word : 'curtain.', poster: null }); // §15b — the script closes
     if (pbIdx >= 0) beats = beats.slice(0, pbIdx).concat(beats.slice(pbIdx + 1));
   }
   saveWorld();
@@ -1634,6 +1694,8 @@ function updateEntity(e, dt) {
   e.directiveT = Math.max(0, (e.directiveT || 0) - dt); // a user activity directive lasts ~10 min
   e.droopT = Math.max(0, (e.droopT || 0) - dt); e.scared = Math.max(0, (e.scared || 0) - dt); // audited-sag / regulator-fright fade
   e.actNatural = Math.max(0, (e.actNatural || 0) - dt); e.leanT = Math.max(0, (e.leanT || 0) - dt); e.jotT = Math.max(0, (e.jotT || 0) - dt); e.edgeCd = Math.max(0, (e.edgeCd || 0) - dt);
+  e.gestureT = Math.max(0, (e.gestureT || 0) - dt); // §15b — landmark gestures fade
+  if (e.beatLine) { e.beatLineT = (e.beatLineT || 0) - dt; if (e.beatLineT <= 0) { say(e, e.beatLine.text, 0, e.beatLine.color); e.beatLine = null; } } // stranded line: deliver wherever
   updateNerve(e, dt); // §7 — nervousness relaxes toward the personality base each tick
   if (tn === 'red' && e.kind !== 'regulator') {
     if (e.state !== 'down') { e.state = 'down'; say(e, TONE_LINES.red[0]); }
@@ -1673,7 +1735,16 @@ function updateEntity(e, dt) {
   } else if (e.state === 'walk') {
     const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy);
     const sp = e.pace * paceMul * depth(e.y) * (e.kind === 'regulator' && regSweep.active ? .55 : 1) * (e.droopT > 0 ? .6 : 1); // stalk slow / audited droop
-    if (d < 4) { e.state = 'idle'; e.idleT = 5 + Math.random() * 11; onArrive(e); }
+    if (d < 4) {
+      e.state = 'idle'; e.idleT = 5 + Math.random() * 11;
+      if (e.beatLine) { // §15b — the line lands where the story is, with the place's gesture
+        say(e, e.beatLine.text, .3, e.beatLine.color);
+        gesture(e, e.beatLine.at);
+        chronicle('“' + e.beatLine.text + '”');
+        e.beatLine = null; e.beatLineT = 0;
+      }
+      onArrive(e);
+    }
     else {
       let wob = e.kind === 'wildcard' ? Math.sin(performance.now() / 90 + e.seed) * 44 * dt : 0;
       e.x += (dx / d) * sp * dt; e.y += (dy / d) * sp * dt + wob;
@@ -1859,6 +1930,7 @@ function drawEntity(e) {
   if (e.droopT > 0) ctx.rotate(.12);                          // audited: a small forward sag
   if (e.kind === 'regulator' && (e.leanT || 0) > 0) ctx.rotate(.16 * (e.dir || 1)); // §7: leans in to inspect
   if (e.scared > 0 && !e.carried) ctx.translate(0, 1.2);      // ducking down, watching him
+  if ((e.gestureT || 0) > 0 && (e.gestureKind === 'crouch' || e.gestureKind === 'sit')) ctx.translate(0, e.gestureKind === 'sit' ? 2.4 : 1.6); // §15b — settling into the place
   const bob = (e.state === 'sleep' || (e.actNatural || 0) > 0) ? 0 : Math.sin(t * (e.kind === 'mythos' ? 1.6 : 2.8) + e.seed) * (e.kind === 'mythos' ? 2.0 : 1.0); // §7: freeze mid-step when acting natural
   ctx.translate(0, bob);
   if (e.state === 'walk' && e.kind !== 'mythos') ctx.rotate(e.dir * .06);
@@ -1960,6 +2032,12 @@ function drawEntity(e) {
       ctx.beginPath(); ctx.moveTo(18.5, -20); ctx.lineTo(23.5, -20); ctx.moveTo(18.5, -16.5); ctx.lineTo(23.5, -16.5); ctx.stroke();
       break;
     }
+  }
+  // §15b — the place's gesture: a pulled book, a hand to the brow, a reaching arm
+  if ((e.gestureT || 0) > 0 && e.state !== 'down' && e.kind !== 'regulator') {
+    if (e.gestureKind === 'book') { const bx = e.dir > 0 ? 5 : -8; P(bx, -11, 3, 4, PAPER); P(bx, -11, .8, 4, AMBER_D); }
+    else if (e.gestureKind === 'brow') P(e.dir > 0 ? 2 : -5, -12.5, 3, 1.2, MUT);
+    else if (e.gestureKind === 'touch') P(e.dir > 0 ? 5 : -8, -9, 3, 1.2, MUT);
   }
   // made the news? he's carrying today's paper around to show everyone
   if (e.newsT > 0 && e.state !== 'down' && e.kind !== 'regulator') {
@@ -2257,6 +2335,15 @@ if (dlJournal) dlJournal.addEventListener('click', ev => { ev.preventDefault(); 
 const dlContinuum = document.getElementById('dlcontinuum');
 if (dlContinuum) dlContinuum.addEventListener('click', ev => { ev.preventDefault(); if (journal.length) downloadText('terrarium_journal_' + isoTs().slice(0, 10) + '.md', exportContinuumMd(), 'text/markdown'); });
 updateJournalLinks(); // reload with an existing journal → the doors are already there
+// §15b — the playbill door
+const pbLink = document.getElementById('playbilllink');
+if (pbLink) pbLink.addEventListener('click', ev => {
+  ev.preventDefault();
+  const el = document.getElementById('playbill'); if (!el) return;
+  if (el.style.display === 'block') el.style.display = 'none';
+  else { el.style.display = 'block'; fillPlaybill(el); }
+});
+updateStoryLink(); // an episode already under way → the door is already there
 // §11 — the command line: enter submits; keystrokes stay out of the world's hotkeys
 const askEl = document.getElementById('askline');
 if (askEl) askEl.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') handleAskSubmit(); });

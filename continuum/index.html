@@ -40,6 +40,15 @@
   #journallinks{display:none;margin-top:12px;font-size:11px;color:var(--faint)}
   #journallinks a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
   #journallinks a:hover{color:var(--ink)}
+  /* §15b — the playbill: the day's story, readable at any moment. violet-coded —
+     the memory/story color, mythos's side of the palette. */
+  #storyline{display:none;margin-top:12px;font-size:12px}
+  #storyline a{color:var(--mut);text-decoration:none;border-bottom:1px solid var(--hair)}
+  #storyline a:hover{color:var(--ink)} #storyline i{color:var(--violet);font-style:normal}
+  #playbill{display:none;margin-top:10px;border:1px solid var(--hair);border-left:2px solid var(--violet);
+            padding:14px 18px;font-size:13px;color:var(--mut);max-width:680px;line-height:1.8}
+  #playbill b{color:var(--ink)} #playbill .act{color:#555;font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:600}
+  #playbill .x{float:right;cursor:pointer;color:var(--faint);padding:0 2px} #playbill .x:hover{color:var(--ink)}
   /* §11 — the command line: one quiet Swiss input. the answer card wears amber,
      perplexity's color — the palette means things here. */
   .askrow{display:flex;align-items:center;gap:10px;margin-top:14px;max-width:680px}
@@ -82,6 +91,8 @@
       <span class="livestat" id="livestat"><span class="livedot"></span>not live</span>
     </div>
     <a id="wireline" target="_blank" rel="noopener">wire &nbsp;·&nbsp; tuning…</a>
+    <div id="storyline"><a href="#" id="playbilllink">today's story <i>›</i></a></div>
+    <div id="playbill"></div>
     <div class="askrow"><span class="askmark">›</span><input id="askline" type="text" autocomplete="off" spellcheck="false" placeholder="ask the archive anything — real sources, filed by the librarian · read &lt;url&gt; · help" /></div>
     <div id="askpanel"></div>
     <div id="wiredetail"></div>
